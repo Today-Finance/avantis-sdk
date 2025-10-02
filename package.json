@@ -1,0 +1,89 @@
+{
+  "name": "@avantis/sdk",
+  "version": "1.0.0-beta.1",
+  "description": "Unofficial TypeScript SDK for Avantis DEX - Decentralized perpetual futures trading (BETA)",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "test": "jest",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration",
+    "test:e2e": "jest tests/e2e",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "avantis",
+    "defi",
+    "dex",
+    "perpetuals",
+    "trading",
+    "blockchain",
+    "base",
+    "ethereum",
+    "web3",
+    "typescript",
+    "unofficial",
+    "beta"
+  ],
+  "author": "Avantis SDK Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/avantis/avantis-sdk-typescript"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "decimal.js": "^10.6.0",
+    "ethers": "^6.15.0",
+    "eventemitter3": "^5.0.1",
+    "isomorphic-ws": "^5.0.0",
+    "ws": "^8.18.3",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-typescript": "^12.1.4",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.6.1",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "eslint": "^9.36.0",
+    "jest": "^30.2.0",
+    "prettier": "^3.6.2",
+    "rollup": "^4.52.3",
+    "rollup-plugin-dts": "^6.2.3",
+    "ts-jest": "^29.4.4",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  }
+}

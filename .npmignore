@@ -1,0 +1,47 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+
+# Config files
+tsconfig.json
+rollup.config.mjs
+jest.config.js
+.eslintrc*
+.prettierrc*
+
+# Development files
+examples/
+tests/
+docs/
+temp/
+coverage/
+*.log
+*.tgz
+verify-sdk.js
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Markdown docs (except README)
+*.md
+!README.md
+!LICENSE
+
+# Reference files
+reference/
+SDK_COMPARISON.md
+CONTRACT_ABIS.md
+CONTRACT_VERIFICATION.md
+PLATFORM_FEE_CHECKLIST.md
