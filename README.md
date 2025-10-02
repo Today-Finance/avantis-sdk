@@ -1,7 +1,7 @@
 # Avantis TypeScript SDK (Unofficial)
 
 [![npm version](https://img.shields.io/npm/v/@avantis/sdk.svg)](https://www.npmjs.com/package/@avantis/sdk)
-[![Beta](https://img.shields.io/badge/Status-Beta-yellow)](https://github.com/avantisfi/avantis-sdk)
+[![Beta](https://img.shields.io/badge/Status-Beta-yellow)](https://github.com/Today-Finance/avantis-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue)](https://www.typescriptlang.org/)
 [![Base Network](https://img.shields.io/badge/Base-Network-0052FF)](https://base.org)
@@ -423,7 +423,7 @@ await sdk.setSigner({
 
 ```bash
 # Clone repository
-git clone https://github.com/avantisfi/avantis-sdk
+git clone https://github.com/Today-Finance/avantis-sdk
 cd avantis-sdk
 
 # Install dependencies
