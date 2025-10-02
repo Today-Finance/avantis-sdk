@@ -25,7 +25,9 @@ export const NETWORKS: Record<'base' | 'base-sepolia', NetworkConfig> = {
       router: '0x0000000000000000000000000000000000000000', // TODO: Get Trading Router address
       avnt: '0x696F9436B67233384889472Cd7cD58A6fB5DF4f1' // AVNT Token
     },
-    websocketUrl: process.env.BASE_WS_URL || 'wss://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY'
+    websocketUrl: process.env.BASE_WS_URL || process.env.ALCHEMY_API_KEY
+      ? `wss://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+      : 'wss://mainnet.base.org' // Public WebSocket endpoint as fallback
   },
   'base-sepolia': {
     chainId: 84531,
@@ -50,7 +52,9 @@ export const NETWORKS: Record<'base' | 'base-sepolia', NetworkConfig> = {
       vault: '0x0000000000000000000000000000000000000000', // TODO: Get testnet Vault address
       router: '0x0000000000000000000000000000000000000000' // TODO: Get testnet Router address
     },
-    websocketUrl: 'wss://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY' // TODO: Add API key
+    websocketUrl: process.env.BASE_SEPOLIA_WS_URL || process.env.ALCHEMY_API_KEY
+      ? `wss://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`
+      : 'wss://sepolia.base.org' // Public WebSocket endpoint as fallback
   }
 };
 

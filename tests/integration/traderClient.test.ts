@@ -38,7 +38,7 @@ describe('TraderClient Integration Tests', () => {
 
     // Setup mock signer
     mockSigner = {
-      getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890'),
+      getAddress: jest.fn().mockResolvedValue('0x1234567890123456789012345678901234567890' as string),
       connect: jest.fn().mockReturnThis(),
       sendTransaction: jest.fn().mockResolvedValue({
         hash: '0xtxhash',
@@ -232,7 +232,7 @@ describe('TraderClient Integration Tests', () => {
 
     it('should close a position', async () => {
       const result = await client.closePosition({
-        positionId: 'position-1',
+        positionId: '0-123', // Format: "pairIndex-positionIndex"
         slippage: 0.5
       });
 

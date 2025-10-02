@@ -52,14 +52,14 @@ export const OpenPositionParamsSchema = z.object({
 
 // Close position params validation
 export const ClosePositionParamsSchema = z.object({
-  positionId: z.string().uuid(),
+  positionId: z.string().regex(/^\d+-\d+$/, 'Position ID must be in format "pairIndex-positionIndex" (e.g., "0-123")'),
   size: DecimalSchema.optional(),
   slippage: SlippageSchema
 });
 
 // Update position params validation
 export const UpdatePositionParamsSchema = z.object({
-  positionId: z.string().uuid(),
+  positionId: z.string().regex(/^\d+-\d+$/, 'Position ID must be in format "pairIndex-positionIndex" (e.g., "0-123")'),
   stopLoss: DecimalSchema.nullable().optional(),
   takeProfit: DecimalSchema.nullable().optional()
 });

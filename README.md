@@ -1,6 +1,6 @@
 # Avantis TypeScript SDK (Unofficial)
 
-[![npm version](https://img.shields.io/npm/v/avantis-sdk-unofficial.svg)](https://www.npmjs.com/package/avantis-sdk-unofficial)
+[![npm version](https://img.shields.io/npm/v/avantis-sdk-io.svg)](https://www.npmjs.com/package/avantis-sdk-io)
 [![Beta](https://img.shields.io/badge/Status-Beta-yellow)](https://github.com/Today-Finance/avantis-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue)](https://www.typescriptlang.org/)
@@ -26,11 +26,11 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 ## 📦 Installation
 
 ```bash
-npm install avantis-sdk-unofficial
+npm install avantis-sdk-io
 # or
-yarn add avantis-sdk-unofficial
+yarn add avantis-sdk-io
 # or
-pnpm add avantis-sdk-unofficial
+pnpm add avantis-sdk-io
 ```
 
 ## 🚀 Quick Start
@@ -38,20 +38,20 @@ pnpm add avantis-sdk-unofficial
 ### Basic Trading
 
 ```typescript
-import { AvantisSDK, PositionSide, OrderType } from 'avantis-sdk-unofficial';
+import { AvantisSDK, PositionSide, OrderType } from 'avantis-sdk-io';
 
 // Initialize SDK
 const sdk = new AvantisSDK('base'); // 'base' for mainnet, 'base-sepolia' for testnet
 
 // Set up signer
 await sdk.setSigner({
-  type: 'private-key',
-  key: process.env.PRIVATE_KEY
+  type: 'privateKey',
+  privateKey: process.env.PRIVATE_KEY
 });
 
 // Open a position
 const result = await sdk.trader.openPosition({
-  pair: 'ETH-USD',
+  pair: 'ETH/USD',
   side: PositionSide.LONG,
   size: 1000, // $1000 position size
   leverage: 10, // 10x leverage
@@ -77,7 +77,7 @@ sdk.trader.setPlatformFeeConfig({
 
 // Open position with fees
 const result = await sdk.trader.openPositionWithFees({
-  pair: 'BTC-USD',
+  pair: 'BTC/USD',
   side: PositionSide.SHORT,
   size: 5000,
   leverage: 25,
@@ -96,13 +96,13 @@ const result = await sdk.trader.openPositionWithFees({
 await sdk.feed.connect();
 
 // Subscribe to price updates
-const unsubscribe = sdk.feed.subscribeToPrice('BTC-USD', (priceData) => {
+const unsubscribe = sdk.feed.subscribeToPrice('BTC/USD', (priceData) => {
   console.log(`BTC Price: $${priceData.price.toFixed(2)}`);
   console.log(`24h Change: ${priceData.change24h}%`);
 });
 
 // Get latest price once
-const price = await sdk.feed.getLatestPrice('ETH-USD');
+const price = await sdk.feed.getLatestPrice('ETH/USD');
 console.log(`ETH: $${price.price}`);
 
 // Cleanup
@@ -141,10 +141,10 @@ const allPairs = sdk.trader.getAllPairs();
 
 // Get pairs by category
 const cryptoPairs = sdk.trader.getPairsByCategory('crypto');
-// Returns: ['BTC-USD', 'ETH-USD', 'SOL-USD', ...]
+// Returns: ['BTC/USD', 'ETH/USD', 'SOL/USD', ...]
 
 const forexPairs = sdk.trader.getPairsByCategory('forex');
-// Returns: ['EUR-USD', 'GBP-USD', 'USD-JPY', ...]
+// Returns: ['EUR/USD', 'GBP/USD', 'USD/JPY', ...]
 ```
 
 ### Position Management
@@ -185,7 +185,7 @@ console.log('Margin Level:', account.marginLevel, '%');
 ```typescript
 // Place a limit order
 const limitOrder = await sdk.trader.openPosition({
-  pair: 'ETH-USD',
+  pair: 'ETH/USD',
   side: PositionSide.LONG,
   size: 2000,
   leverage: 15,
@@ -379,14 +379,14 @@ console.log(`Network: ${network.name} (Chain ID: ${network.chainId})`);
 ```typescript
 // Private key (Node.js)
 await sdk.setSigner({
-  type: 'private-key',
-  key: '0x...'
+  type: 'privateKey',
+  privateKey: '0x...'
 });
 
 // Mnemonic phrase
 await sdk.setSigner({
   type: 'mnemonic',
-  phrase: 'your twelve word phrase...',
+  mnemonic: 'your twelve word phrase...',
   path: "m/44'/60'/0'/0/0" // Optional HD path
 });
 

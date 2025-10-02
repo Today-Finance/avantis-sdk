@@ -1,5 +1,5 @@
 {
-  "name": "avantis-sdk-unofficial",
+  "name": "avantis-sdk-io",
   "version": "1.0.0-beta.1",
   "description": "Unofficial TypeScript SDK for Avantis DEX - Decentralized perpetual futures trading (BETA)",
   "main": "dist/index.js",
