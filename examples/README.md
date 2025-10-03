@@ -5,15 +5,15 @@
 ### Installation
 
 ```bash
-npm install @avantis/sdk
+npm install @todayapp/avantis-sdk
 # or
-yarn add @avantis/sdk
+yarn add @todayapp/avantis-sdk
 ```
 
 ### Basic Usage
 
 ```typescript
-import { TraderClient, PositionSide } from '@avantis/sdk';
+import { TraderClient, PositionSide } from '@todayapp/avantis-sdk';
 
 // Initialize the SDK
 const trader = new TraderClient('base'); // or 'base-sepolia' for testnet
@@ -211,7 +211,7 @@ await trader.approveUSDCForTrading('1000'); // Approve $1,000
 ## Error Handling
 
 ```typescript
-import { TradingError, ErrorCode } from '@avantis/sdk';
+import { TradingError, ErrorCode } from '@todayapp/avantis-sdk';
 
 try {
   await trader.openPosition(params);

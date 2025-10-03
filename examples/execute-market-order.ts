@@ -3,7 +3,7 @@
  * This example shows how to use the Avantis SDK in a React Native/Expo app
  */
 
-import { TraderClient, FeedClient, PositionSide, formatUSDC, formatPrice } from '@avantis/sdk';
+import { TraderClient, FeedClient, PositionSide, formatUSDC, formatPrice } from '@todayapp/avantis-sdk';
 import { Wallet } from 'ethers';
 import Decimal from 'decimal.js';
 

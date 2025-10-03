@@ -13,7 +13,7 @@ import {
   formatPercentage,
   ErrorCode,
   TradingError,
-} from '@avantis/sdk';
+} from '@todayapp/avantis-sdk';
 import Decimal from 'decimal.js';
 
 /**

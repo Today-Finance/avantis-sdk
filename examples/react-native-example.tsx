@@ -15,7 +15,7 @@ import {
   ActivityIndicator,
   StyleSheet
 } from 'react-native';
-import { TraderClient, FeedClient, Position, PriceFeedData, AccountInfo } from '@avantis/sdk';
+import { TraderClient, FeedClient, Position, PriceFeedData, AccountInfo } from '@todayapp/avantis-sdk';
 import Decimal from 'decimal.js';
 
 // Import polyfills at the top of your app

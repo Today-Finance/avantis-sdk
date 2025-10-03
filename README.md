@@ -1,6 +1,6 @@
 # Avantis TypeScript SDK (Unofficial)
 
-[![npm version](https://img.shields.io/npm/v/avantis-sdk-io.svg)](https://www.npmjs.com/package/avantis-sdk-io)
+[![npm version](https://img.shields.io/npm/v/@todayapp/avantis-sdk.svg)](https://www.npmjs.com/package/@todayapp/avantis-sdk)
 [![Beta](https://img.shields.io/badge/Status-Beta-yellow)](https://github.com/Today-Finance/avantis-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue)](https://www.typescriptlang.org/)
@@ -27,11 +27,11 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 ## 📦 Installation
 
 ```bash
-npm install avantis-sdk-io
+npm install @todayapp/avantis-sdk
 # or
-yarn add avantis-sdk-io
+yarn add @todayapp/avantis-sdk
 # or
-pnpm add avantis-sdk-io
+pnpm add @todayapp/avantis-sdk
 ```
 
 ## 🚀 Quick Start
@@ -39,7 +39,7 @@ pnpm add avantis-sdk-io
 ### Basic Trading
 
 ```typescript
-import { AvantisSDK, PositionSide, OrderType } from 'avantis-sdk-io';
+import { AvantisSDK, PositionSide, OrderType } from '@todayapp/avantis-sdk';
 
 // Initialize SDK
 const sdk = new AvantisSDK('base'); // 'base' for mainnet, 'base-sepolia' for testnet
@@ -307,11 +307,11 @@ The SDK provides detailed error types for robust error handling:
 
 ```typescript
 import { 
-  TradingError, 
-  ValidationError, 
+  TradingError,
+  ValidationError,
   NetworkError,
-  ErrorCode 
-} from '@avantis/sdk';
+  ErrorCode
+} from '@todayapp/avantis-sdk';
 
 try {
   await sdk.trader.openPosition(params);

@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { TraderClient, FeedClient, PositionSide, formatUSDC, formatPrice, formatPnL } from '@avantis/sdk';
+import { TraderClient, FeedClient, PositionSide, formatUSDC, formatPrice, formatPnL } from '@todayapp/avantis-sdk';
 import Decimal from 'decimal.js';
 
 // Types

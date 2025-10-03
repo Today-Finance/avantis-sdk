@@ -11,7 +11,7 @@ import {
   formatPrice,
   formatPercentage,
   PositionSide
-} from '@avantis/sdk';
+} from '@todayapp/avantis-sdk';
 import Decimal from 'decimal.js';
 
 // Configuration
