@@ -98,3 +98,6 @@ debug/
 *.backup
 *.old
 .history/
+
+# Documentation
+@docs/
