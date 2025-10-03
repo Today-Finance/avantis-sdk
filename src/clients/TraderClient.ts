@@ -19,7 +19,11 @@ import {
   OrderType,
   OrderTypeValue,
   SignerConfig,
-  NetworkConfig
+  NetworkConfig,
+  UpdateMarginParams,
+  MarginUpdateType,
+  ExecuteLimitOrderParams,
+  LimitOrderType
 } from '../types';
 import {
   validateAddress,
@@ -47,10 +51,11 @@ import {
   handleError
 } from '../utils/errors';
 import { NETWORKS, TRADING_PAIRS, FEES, DEFAULTS } from '../constants/networks';
-import { TradingContractABI, USDCContractABI, Multicall3ContractABI } from '../contracts';
+import { TradingContractABI, USDCContractABI, Multicall3ContractABI, TradingStorageContractABI } from '../contracts';
 import { FeeManager } from '../fees/FeeManager';
 import { MulticallBundler } from '../fees/MulticallBundler';
 import type { PlatformFeeConfig, PlatformFeeParams, FeeBreakdown } from '../types/platform-fees';
+import { PythClient } from './PythClient';
 
 export class TraderClient extends EventEmitter {
   private blockchain: BlockchainProvider;
@@ -60,6 +65,7 @@ export class TraderClient extends EventEmitter {
   private positions: Map<string, Position> = new Map();
   private feeManager?: FeeManager;
   private multicallBundler?: MulticallBundler;
+  private pythClient: PythClient;
 
   constructor(
     networkName: keyof typeof NETWORKS = 'base',
@@ -68,7 +74,7 @@ export class TraderClient extends EventEmitter {
     super();
     this.blockchain = new BlockchainProvider(networkName, customRpcUrl);
     this.network = this.blockchain.getNetwork();
-    
+
     // Initialize USDC contract (always needed)
     const provider = this.blockchain.getProvider();
     this.usdcContract = new ethers.Contract(
@@ -76,7 +82,12 @@ export class TraderClient extends EventEmitter {
       USDCContractABI,
       provider
     );
-    
+
+    // Initialize Pyth client for price oracle data
+    this.pythClient = new PythClient({
+      network: networkName === 'base-sepolia' ? 'testnet' : 'mainnet'
+    });
+
     this.initializeContracts();
   }
 
@@ -127,6 +138,13 @@ export class TraderClient extends EventEmitter {
    */
   public getNetwork(): NetworkConfig {
     return this.network;
+  }
+
+  /**
+   * Gets the Pyth client for advanced price oracle operations
+   */
+  public getPythClient(): PythClient {
+    return this.pythClient;
   }
 
   /**
@@ -365,13 +383,27 @@ export class TraderClient extends EventEmitter {
         sl: stopLossUnits,
         timestamp: 0 // Current timestamp
       };
-      
+
+      // Get Pyth price update data
+      const autofetch = params.autofetchPrices !== false; // Default to true
+      let priceUpdateData: string[] = params.priceUpdateData || [];
+
+      if (autofetch && priceUpdateData.length === 0) {
+        try {
+          priceUpdateData = await this.pythClient.getPriceUpdateData(params.pair);
+        } catch (error) {
+          // Log warning but continue - some contracts may not require price data
+          console.warn(`Failed to fetch Pyth price data for ${params.pair}:`, error);
+        }
+      }
+
       // Execute transaction with proper execution fee
-      const executionFee = ethers.parseEther('0.001'); // 0.001 ETH execution fee
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
       const tx = await this.tradingContract.openTrade(
         tradeStruct,
         orderTypeValue,
         slippageUnits,
+        priceUpdateData,
         { value: executionFee }
       );
       
@@ -452,13 +484,29 @@ export class TraderClient extends EventEmitter {
       
       // Determine close amount (0 means close full position)
       const closeAmount = params.size ? toUSDCUnits(params.size) : 0;
-      
+
+      // Get pair name for Pyth price data
+      const pairName = getPairName(pairIndex);
+
+      // Get Pyth price update data
+      const autofetch = params.autofetchPrices !== false; // Default to true
+      let priceUpdateData: string[] = params.priceUpdateData || [];
+
+      if (autofetch && priceUpdateData.length === 0) {
+        try {
+          priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
+        } catch (error) {
+          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
+        }
+      }
+
       // Execute closeTradeMarket with execution fee
-      const executionFee = ethers.parseEther('0.001');
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
       const tx = await this.tradingContract.closeTradeMarket(
         pairIndex,
         positionIndex,
         closeAmount,
+        priceUpdateData,
         { value: executionFee }
       );
       
@@ -506,10 +554,25 @@ export class TraderClient extends EventEmitter {
       
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
-      
+
       const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0n;
       const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0n;
-      
+
+      // Get pair name for Pyth price data
+      const pairName = getPairName(pairIndex);
+
+      // Get Pyth price update data
+      const autofetch = params.autofetchPrices !== false; // Default to true
+      let priceUpdateData: string[] = params.priceUpdateData || [];
+
+      if (autofetch && priceUpdateData.length === 0) {
+        try {
+          priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
+        } catch (error) {
+          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
+        }
+      }
+
       // Execute updateTpAndSl transaction
       // Note: Contract expects (pairIndex, index, _newSl, _newTP, priceUpdateData)
       const tx = await this.tradingContract.updateTpAndSl(
@@ -517,7 +580,7 @@ export class TraderClient extends EventEmitter {
         positionIndex,
         stopLossUnits,    // Stop loss FIRST
         takeProfitUnits,  // Take profit SECOND
-        []                // Empty priceUpdateData array (required parameter)
+        priceUpdateData   // Pyth price update data
       );
       
       const receipt = await tx.wait();
@@ -541,21 +604,35 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
-   * Gets a specific position
+   * Gets a specific position from TradingStorage
    */
-  public async getPosition(positionId: string): Promise<Position | null> {
+  public async getPosition(pairIndex: number, positionIndex: number, trader?: string): Promise<Position | null> {
     try {
-      if (!this.tradingContract) {
+      const addr = trader || await this.getAddress();
+
+      // Get position data from TradingStorage via storage contract interface
+      const provider = this.blockchain.getProvider();
+      const tradingStorageAddress = this.network.contracts.tradingStorage;
+
+      if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
         return null;
       }
-      
-      const data = await this.tradingContract.getPosition(positionId);
-      
-      if (!data || data.status === 0) {
+
+      const tradingStorageContract = new ethers.Contract(
+        tradingStorageAddress,
+        TradingStorageContractABI,
+        provider
+      );
+
+      // Call openTrades(trader, pairIndex, index)
+      const trade = await tradingStorageContract.openTrades(addr, pairIndex, positionIndex);
+
+      // Check if trade exists (trader address should not be zero)
+      if (!trade || trade.trader === '0x0000000000000000000000000000000000000000') {
         return null;
       }
-      
-      return this.parsePositionData(data);
+
+      return await this.parsePositionData(trade, pairIndex, positionIndex);
     } catch (error) {
       // Silently return null for missing positions
       return null;
@@ -567,18 +644,27 @@ export class TraderClient extends EventEmitter {
    */
   public async getPositions(address?: string): Promise<Position[]> {
     try {
-      if (!this.tradingContract) {
-        return [];
-      }
-      
       const addr = address || await this.getAddress();
-      const positionIds = await this.tradingContract.getPositions(addr);
-      
-      const positions = await Promise.all(
-        positionIds.map((id: string) => this.getPosition(id))
-      );
-      
-      return positions.filter((p): p is Position => p !== null);
+
+      // Get all trading pairs
+      const pairs = getAllPairs();
+      const positions: Position[] = [];
+
+      // For each pair, check for open positions (indices 0-2 typically max 3 positions per pair)
+      // This is a limitation - ideally we'd have a way to query all positions directly
+      for (const pairName of pairs) {
+        const pairIndex = getPairIndex(pairName);
+
+        // Check up to 10 potential position indices per pair
+        for (let i = 0; i < 10; i++) {
+          const position = await this.getPosition(pairIndex, i, addr);
+          if (position) {
+            positions.push(position);
+          }
+        }
+      }
+
+      return positions;
     } catch (error) {
       // Return empty array for errors
       return [];
@@ -586,30 +672,62 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
-   * Parses position data from contract
+   * Parses position data from contract and enriches with calculations
    */
-  private parsePositionData(data: any): Position {
-    // TODO: Implement actual parsing based on contract response
-    // This is a placeholder implementation
+  private async parsePositionData(trade: any, pairIndex: number, positionIndex: number): Promise<Position> {
+    const pairName = getPairName(pairIndex);
+    const side = trade.buy ? PositionSide.LONG : PositionSide.SHORT;
+    const collateral = new Decimal(formatUSDC(trade.initialPosToken));
+    const leverage = Number(trade.leverage);
+    const size = new Decimal(formatUSDC(trade.positionSizeUSDC));
+    const entryPrice = new Decimal(formatUSDC(trade.openPrice));
+
+    // Calculate liquidation price
+    const { calculateLiquidationPrice, calculateUnrealizedPnL } = await import('../utils/calculations');
+    const liquidationPrice = calculateLiquidationPrice(entryPrice, leverage, side);
+
+    // Get current mark price (try to fetch, fallback to entry price)
+    let markPrice = entryPrice;
+    try {
+      // Try to get current price from price aggregator contract if available
+      if (this.network.contracts.priceAggregator && this.network.contracts.priceAggregator !== '0x0000000000000000000000000000000000000000') {
+        const priceAggregatorContract = new ethers.Contract(
+          this.network.contracts.priceAggregator,
+          (await import('../contracts')).PriceAggregatorContractABI,
+          this.blockchain.getProvider()
+        );
+        const priceData = await priceAggregatorContract.getPrice(pairIndex);
+        markPrice = new Decimal(formatUSDC(priceData.price || priceData[0]));
+      }
+    } catch {
+      // Use entry price as fallback
+    }
+
+    // Calculate unrealized PnL
+    const unrealizedPnl = calculateUnrealizedPnL(entryPrice, markPrice, size, side, leverage);
+
+    // Calculate maintenance margin (typically 0.5% of position size)
+    const maintenanceMargin = size.mul(0.005);
+
     return {
-      id: data.id.toString(),
-      owner: data.owner,
-      pair: data.pair,
-      side: data.isLong ? PositionSide.LONG : PositionSide.SHORT,
-      size: new Decimal(formatUSDC(data.size)),
-      collateral: new Decimal(formatUSDC(data.collateral)),
-      leverage: Number(data.leverage),
-      entryPrice: new Decimal(formatUSDC(data.entryPrice)),
-      markPrice: new Decimal(0), // TODO: Get from price feed
-      liquidationPrice: new Decimal(0), // TODO: Calculate
-      unrealizedPnl: new Decimal(0), // TODO: Calculate
-      realizedPnl: new Decimal(0),
-      stopLoss: data.stopLoss ? new Decimal(formatUSDC(data.stopLoss)) : undefined,
-      takeProfit: data.takeProfit ? new Decimal(formatUSDC(data.takeProfit)) : undefined,
-      margin: new Decimal(formatUSDC(data.collateral)),
-      maintenanceMargin: new Decimal(0), // TODO: Calculate
+      id: `${pairIndex}-${positionIndex}`,
+      owner: trade.trader,
+      pair: pairName,
+      side,
+      size,
+      collateral,
+      leverage,
+      entryPrice,
+      markPrice,
+      liquidationPrice,
+      unrealizedPnl,
+      realizedPnl: new Decimal(0), // Not tracked in this version
+      stopLoss: trade.sl && Number(trade.sl) > 0 ? new Decimal(formatUSDC(trade.sl)) : undefined,
+      takeProfit: trade.tp && Number(trade.tp) > 0 ? new Decimal(formatUSDC(trade.tp)) : undefined,
+      margin: collateral,
+      maintenanceMargin,
       status: PositionStatus.OPEN,
-      openedAt: new Date(Number(data.openTime) * 1000),
+      openedAt: new Date(Number(trade.timestamp) * 1000),
       lastUpdated: new Date()
     };
   }
@@ -881,8 +999,8 @@ export class TraderClient extends EventEmitter {
       };
       
       const slippageUnits = ethers.parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
-      const executionFee = ethers.parseEther('0.001');
-      
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
       const bundled = this.multicallBundler.bundleTradeWithFees({
@@ -974,8 +1092,8 @@ export class TraderClient extends EventEmitter {
       
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
-      const executionFee = ethers.parseEther('0.001');
-      
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+
       const bundled = this.multicallBundler.bundleCloseWithFees({
         usdcAddress: this.network.contracts.usdc,
         tradingAddress: this.network.contracts.trading,
@@ -1014,6 +1132,181 @@ export class TraderClient extends EventEmitter {
       };
     } catch (error) {
       throw handleError(error);
+    }
+  }
+
+  /**
+   * Updates margin for an open position (add or remove collateral)
+   */
+  public async updateMargin(params: UpdateMarginParams): Promise<TradeResponse> {
+    try {
+      if (!this.tradingContract) {
+        throw new TradingError(
+          ErrorCode.CONTRACT_NOT_FOUND,
+          'Trading contract not deployed on this network'
+        );
+      }
+
+      const amountUnits = toUSDCUnits(params.amount);
+
+      // Get pair name for Pyth price data
+      const pairName = getPairName(params.pairIndex);
+
+      // Get Pyth price update data
+      const autofetch = params.autofetchPrices !== false; // Default to true
+      let priceUpdateData: string[] = params.priceUpdateData || [];
+
+      if (autofetch && priceUpdateData.length === 0) {
+        try {
+          priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
+        } catch (error) {
+          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
+        }
+      }
+
+      // Execute updateMargin transaction
+      // Note: This requires an execution fee
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const tx = await this.tradingContract.updateMargin(
+        params.pairIndex,
+        params.positionIndex,
+        params.type, // 0 = ADD, 1 = REMOVE
+        amountUnits,
+        priceUpdateData,
+        { value: executionFee }
+      );
+
+      const receipt = await tx.wait();
+
+      this.emit('marginUpdated', {
+        pairIndex: params.pairIndex,
+        positionIndex: params.positionIndex,
+        type: params.type,
+        amount: params.amount,
+        transactionHash: receipt.hash
+      });
+
+      return {
+        success: receipt.status === 1,
+        transactionHash: receipt.hash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Executes a limit order (for keepers/bots)
+   */
+  public async executeLimitOrder(params: ExecuteLimitOrderParams): Promise<TradeResponse> {
+    try {
+      if (!this.tradingContract) {
+        throw new TradingError(
+          ErrorCode.CONTRACT_NOT_FOUND,
+          'Trading contract not deployed on this network'
+        );
+      }
+
+      const priceUpdateData = params.priceUpdateData || [];
+
+      // Calculate execution fee (may need to cover Pyth fee)
+      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+
+      // Execute the limit order
+      const tx = await this.tradingContract.executeLimitOrder(
+        params.orderType, // LimitOrderType enum
+        params.trader,
+        params.pairIndex,
+        params.index,
+        priceUpdateData,
+        { value: executionFee }
+      );
+
+      const receipt = await tx.wait();
+
+      this.emit('limitOrderExecuted', {
+        orderType: params.orderType,
+        trader: params.trader,
+        pairIndex: params.pairIndex,
+        index: params.index,
+        transactionHash: receipt.hash
+      });
+
+      return {
+        success: receipt.status === 1,
+        transactionHash: receipt.hash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Gets all pending limit orders for the current account
+   */
+  public async getPendingLimitOrders(address?: string): Promise<PendingLimitOrder[]> {
+    try {
+      const addr = address || await this.getAddress();
+
+      // Use StorageClient to fetch pending orders
+      const provider = this.blockchain.getProvider();
+      const tradingStorageAddress = this.network.contracts.tradingStorage;
+
+      if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
+        return [];
+      }
+
+      const tradingStorageContract = new ethers.Contract(
+        tradingStorageAddress,
+        TradingStorageContractABI,
+        provider
+      );
+
+      // Get pending orders from storage
+      // Note: This is a simplified implementation
+      // In reality, you'd need to iterate through pairs and indices
+      const orders: PendingLimitOrder[] = [];
+
+      // For each pair, check for pending limit orders
+      const pairs = getAllPairs();
+      for (const pairName of pairs) {
+        const pairIndex = getPairIndex(pairName);
+
+        // Check up to 3 potential order indices per pair
+        for (let i = 0; i < 3; i++) {
+          try {
+            const order = await tradingStorageContract.openLimitOrders(addr, pairIndex, i);
+
+            // Check if order exists
+            if (order && order.trader !== '0x0000000000000000000000000000000000000000') {
+              orders.push({
+                id: `${pairIndex}-${i}`,
+                trader: order.trader,
+                pairIndex,
+                orderIndex: i,
+                positionSize: new Decimal(formatUSDC(order.positionSizeUSDC)),
+                buy: order.buy,
+                leverage: Number(order.leverage),
+                openPrice: new Decimal(formatUSDC(order.minPrice || order.maxPrice)),
+                tp: order.tp && Number(order.tp) > 0 ? new Decimal(formatUSDC(order.tp)) : undefined,
+                sl: order.sl && Number(order.sl) > 0 ? new Decimal(formatUSDC(order.sl)) : undefined,
+                timestamp: new Date(),
+                orderType: OrderType.LIMIT
+              });
+            }
+          } catch {
+            // Skip invalid orders
+          }
+        }
+      }
+
+      return orders;
+    } catch (error) {
+      return [];
     }
   }
 

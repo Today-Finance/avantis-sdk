@@ -15,9 +15,10 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 ## ✨ Features
 
 - 🚀 **Full Trading Suite**: Market orders, limit orders, stop orders, and position management
+- 🔮 **Pyth Oracle Integration**: Automatic price feed fetching from Pyth Network for all 42 trading pairs
 - 💰 **Platform Fee System**: Built-in fee management with referral support and transaction bundling
 - 📊 **Real-time Data**: WebSocket-based live price feeds and market data
-- 💱 **40+ Trading Pairs**: Crypto, forex, commodities, and indices
+- 💱 **42 Trading Pairs**: Crypto, forex, commodities, and indices with Pyth price feeds
 - 🔐 **Type-Safe**: Full TypeScript with runtime validation using Zod
 - 📱 **Cross-Platform**: Works with Node.js, browsers, and React Native
 - ⚡ **Gas Optimized**: Multicall3 transaction bundling for 30-40% gas savings
@@ -109,6 +110,49 @@ console.log(`ETH: $${price.price}`);
 unsubscribe();
 await sdk.feed.disconnect();
 ```
+
+### Pyth Network Oracle Integration
+
+The SDK automatically fetches real-time price data from [Pyth Network](https://pyth.network) oracles, which is required by Avantis smart contracts:
+
+```typescript
+// Automatic price fetching (default behavior)
+const result = await sdk.trader.openPosition({
+  pair: 'BTC/USD',
+  side: PositionSide.LONG,
+  size: 1000,
+  leverage: 10
+  // Pyth prices automatically fetched and included!
+});
+
+// Manual control over price fetching
+const result = await sdk.trader.openPosition({
+  pair: 'ETH/USD',
+  side: PositionSide.SHORT,
+  size: 500,
+  leverage: 5,
+  autofetchPrices: false, // Disable auto-fetch
+  priceUpdateData: customPriceData // Provide your own price data
+});
+
+// Direct access to Pyth client
+const pythPrice = await sdk.pyth.getLatestPrice('BTC/USD');
+console.log(`BTC: $${pythPrice.price} (expo: ${pythPrice.expo})`);
+
+// Fetch price update data for multiple pairs
+const priceData = await sdk.pyth.getPriceUpdateDataForPairs([
+  'BTC/USD', 'ETH/USD', 'SOL/USD'
+]);
+
+// Use in transactions
+await sdk.trader.openPosition({
+  pair: 'BTC/USD',
+  // ... other params
+  priceUpdateData: priceData
+});
+```
+
+**Why Pyth?** Avantis uses Pyth Network's decentralized oracle for accurate, low-latency price feeds. The SDK handles all the complexity of fetching and formatting price data automatically.
 
 ## 📱 React Native Setup
 
@@ -403,6 +447,7 @@ await sdk.setSigner({
 - **`AvantisSDK`**: Main SDK wrapper class
 - **`TraderClient`**: Trading operations and position management
 - **`FeedClient`**: Real-time price feeds and market data
+- **`PythClient`**: Pyth Network oracle price data fetching
 - **`StorageClient`**: On-chain storage interactions
 - **`PriceClient`**: Price aggregation and oracles
 - **`FeeManager`**: Platform fee calculations
@@ -411,11 +456,14 @@ await sdk.setSigner({
 ### Key Types
 
 - **`Position`**: Open position data
-- **`OpenPositionParams`**: Parameters for opening positions
-- **`ClosePositionParams`**: Parameters for closing positions
+- **`OpenPositionParams`**: Parameters for opening positions (with `autofetchPrices` and `priceUpdateData`)
+- **`ClosePositionParams`**: Parameters for closing positions (with Pyth support)
+- **`UpdatePositionParams`**: Parameters for updating positions (with Pyth support)
+- **`UpdateMarginParams`**: Parameters for margin updates (with Pyth support)
 - **`PlatformFeeConfig`**: Platform fee configuration
 - **`MarketStats`**: 24-hour market statistics
 - **`AccountInfo`**: Complete account information
+- **`PythPriceUpdate`**: Pyth price feed data structure
 
 ## 🧪 Development
 

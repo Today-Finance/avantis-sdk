@@ -6,6 +6,7 @@ export { TraderClient } from './clients/TraderClient';
 export { FeedClient } from './clients/FeedClient';
 export { StorageClient } from './clients/StorageClient';
 export { PriceClient } from './clients/PriceClient';
+export { PythClient } from './clients/PythClient';
 
 // Fee management exports
 export { FeeManager } from './fees/FeeManager';
@@ -36,6 +37,7 @@ export {
 
 // Constants exports
 export { NETWORKS, TRADING_PAIRS, FEES, DEFAULTS } from './constants/networks';
+export { PYTH_PRICE_FEEDS, getPythFeedId, getPythFeedIds } from './constants/pythFeeds';
 
 // Contract ABIs and utilities
 export * from './contracts';

@@ -6,6 +6,7 @@ import { TraderClient } from './clients/TraderClient';
 import { FeedClient } from './clients/FeedClient';
 import { StorageClient } from './clients/StorageClient';
 import { PriceClient } from './clients/PriceClient';
+import { PythClient } from './clients/PythClient';
 import type { SignerConfig } from './types';
 import { NETWORKS } from './constants/networks';
 
@@ -14,7 +15,8 @@ export class AvantisSDK {
   public readonly feed: FeedClient;
   public readonly storage: StorageClient;
   public readonly price: PriceClient;
-  
+  public readonly pyth: PythClient;
+
   private readonly networkName: keyof typeof NETWORKS;
   
   /**
@@ -27,12 +29,15 @@ export class AvantisSDK {
     customRpcUrl?: string
   ) {
     this.networkName = networkName;
-    
+
     // Initialize all clients
     this.trader = new TraderClient(networkName, customRpcUrl);
     this.feed = new FeedClient({ network: networkName }); // FeedClient uses different config
     this.storage = new StorageClient(networkName, customRpcUrl);
     this.price = new PriceClient(networkName, customRpcUrl);
+    this.pyth = new PythClient({
+      network: networkName === 'base-sepolia' ? 'testnet' : 'mainnet'
+    });
   }
   
   /**
@@ -70,6 +75,13 @@ export class AvantisSDK {
     // Add disconnect for other clients if they have this method
   }
   
+  /**
+   * Gets all pending limit orders for the current account
+   */
+  public async getPendingLimitOrders(): Promise<any[]> {
+    return await this.trader.getPendingLimitOrders();
+  }
+
   /**
    * Gets the SDK version
    */

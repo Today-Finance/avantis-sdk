@@ -55,6 +55,8 @@ export interface OpenPositionParams {
   slippage?: number;
   referrer?: string;
   platformFee?: PlatformFeeParams;  // Platform fee configuration
+  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[];  // Manually provided Pyth price update data
 }
 
 export interface ClosePositionParams {
@@ -62,12 +64,16 @@ export interface ClosePositionParams {
   size?: Decimal | number | string;
   slippage?: number;
   platformFee?: PlatformFeeParams;  // Platform fee configuration
+  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[];  // Manually provided Pyth price update data
 }
 
 export interface UpdatePositionParams {
   positionId: string;
   stopLoss?: Decimal | number | string | null;
   takeProfit?: Decimal | number | string | null;
+  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[];  // Manually provided Pyth price update data
 }
 
 export interface CancelLimitOrderParams {
@@ -173,4 +179,35 @@ export interface MarketStats {
   openInterest: Decimal;
   fundingRate: Decimal;
   nextFundingTime: Date;
+}
+
+// Margin update types
+export enum MarginUpdateType {
+  ADD = 0,
+  REMOVE = 1
+}
+
+export interface UpdateMarginParams {
+  pairIndex: number;
+  positionIndex: number;
+  type: MarginUpdateType;
+  amount: Decimal | number | string;
+  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[];  // Manually provided Pyth price update data
+}
+
+// Limit order execution types
+export enum LimitOrderType {
+  TP = 0,    // Take Profit
+  SL = 1,    // Stop Loss
+  LIQ = 2,   // Liquidation
+  OPEN = 3   // Open Limit Order
+}
+
+export interface ExecuteLimitOrderParams {
+  orderType: LimitOrderType;
+  trader: string;
+  pairIndex: number;
+  index: number;
+  priceUpdateData?: string[]; // Pyth price update data
 }
