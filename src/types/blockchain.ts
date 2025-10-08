@@ -25,6 +25,8 @@ export interface NetworkConfig {
     vault: string;
     router: string;
     avnt?: string;
+    multicall?: string;
+    referral?: string;
   };
   websocketUrl?: string;
 }

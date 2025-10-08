@@ -41,6 +41,10 @@ export class PriceClient {
   private priceAggregatorContract?: Contract;
   private pairInfosContract?: Contract;
   private network: NetworkConfig;
+  private pairInfoCache: Map<number, PairInfo> = new Map();
+  private allPairsCache: PairInfo[] | null = null;
+  private cacheTimestamp: number = 0;
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     networkName: keyof typeof NETWORKS = 'base',
@@ -126,15 +130,23 @@ export class PriceClient {
   /**
    * Gets pair information
    */
-  public async getPairInfo(pairIndex: number): Promise<PairInfo> {
+  public async getPairInfo(pairIndex: number, useCache: boolean = true): Promise<PairInfo> {
     try {
+      // Check cache first
+      if (useCache && this.pairInfoCache.has(pairIndex)) {
+        const cached = this.pairInfoCache.get(pairIndex)!;
+        if (Date.now() - this.cacheTimestamp < this.CACHE_TTL_MS) {
+          return cached;
+        }
+      }
+
       if (!this.pairInfosContract) {
         throw new Error('PairInfos contract not available');
       }
-      
+
       const info = await this.pairInfosContract.pairInfo(pairIndex);
-      
-      return {
+
+      const pairInfo: PairInfo = {
         id: pairIndex,
         name: info.name || `Pair ${pairIndex}`,
         from: info.from,
@@ -150,33 +162,130 @@ export class PriceClient {
         maxOpenInterestLong: new Decimal(formatUSDC(info.maxOpenInterestLong)),
         maxOpenInterestShort: new Decimal(formatUSDC(info.maxOpenInterestShort))
       };
+
+      // Update cache
+      this.pairInfoCache.set(pairIndex, pairInfo);
+
+      return pairInfo;
     } catch (error) {
       throw handleError(error);
     }
   }
 
   /**
-   * Gets all pair infos
+   * Gets all pair infos dynamically from the contract
+   * Note: This uses the blockchain provider to access PairStorage for the count
+   * @param useCache - Whether to use cached data (default: true)
+   * @param onProgress - Optional callback to track progress
    */
-  public async getAllPairInfos(): Promise<PairInfo[]> {
+  public async getAllPairInfos(
+    useCache: boolean = true,
+    onProgress?: (current: number, total: number) => void
+  ): Promise<PairInfo[]> {
     try {
+      // Check cache first
+      if (useCache && this.allPairsCache && Date.now() - this.cacheTimestamp < this.CACHE_TTL_MS) {
+        return this.allPairsCache;
+      }
+
       if (!this.pairInfosContract) {
         throw new Error('PairInfos contract not available');
       }
-      
-      const count = await this.pairInfosContract.pairsCount();
+
+      // Get pairs count from PairStorage contract
+      const provider = this.blockchain.getProvider();
+      const pairStorageAddress = this.network.contracts.pairStorage;
+      if (!pairStorageAddress) {
+        throw new Error('PairStorage contract address not configured');
+      }
+
+      // Normalize address to proper checksum format
+      const normalizedAddress = ethers.getAddress(pairStorageAddress);
+
+      // Simple ABI for pairsCount function
+      const pairStorageAbi = ['function pairsCount() external view returns (uint256)'];
+      const pairStorageContract = new ethers.Contract(normalizedAddress, pairStorageAbi, provider);
+
+      const count = await pairStorageContract.pairsCount();
+      const totalPairs = Number(count);
       const pairInfos: PairInfo[] = [];
-      
-      for (let i = 0; i < Number(count); i++) {
+      const errors: Array<{ index: number; error: string }> = [];
+
+      console.log(`Fetching ${totalPairs} pairs from PairInfos contract...`);
+
+      for (let i = 0; i < totalPairs; i++) {
         try {
-          const info = await this.getPairInfo(i);
+          const info = await this.getPairInfo(i, false); // Don't use cache during bulk fetch
           pairInfos.push(info);
-        } catch {
-          // Skip invalid pairs
+
+          if (onProgress) {
+            onProgress(i + 1, totalPairs);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          errors.push({ index: i, error: errorMsg });
+          console.warn(`Failed to fetch pair ${i}: ${errorMsg}`);
+          // Continue with next pair
         }
       }
-      
+
+      console.log(`Successfully fetched ${pairInfos.length}/${totalPairs} pairs`);
+      if (errors.length > 0) {
+        console.warn(`Failed to fetch ${errors.length} pairs:`, errors);
+      }
+
+      // Update cache
+      this.allPairsCache = pairInfos;
+      this.cacheTimestamp = Date.now();
+
       return pairInfos;
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Clears the pair info cache and forces a refresh on next request
+   */
+  public clearCache(): void {
+    this.pairInfoCache.clear();
+    this.allPairsCache = null;
+    this.cacheTimestamp = 0;
+  }
+
+  /**
+   * Refreshes all pair info from the contract
+   */
+  public async refreshPairInfos(onProgress?: (current: number, total: number) => void): Promise<PairInfo[]> {
+    this.clearCache();
+    return await this.getAllPairInfos(false, onProgress);
+  }
+
+  /**
+   * Gets pair info from PairInfos contract by index
+   * Note: PairInfos contract on Avantis stores fee/rollover data, not pair names
+   * Pair names are derived from pair index
+   */
+  public async getPairInfosData(pairIndex: number): Promise<any> {
+    try {
+      // PairInfos doesn't have pair metadata like names - it only has fee/rollover info
+      // We return basic structure with default values
+      // Actual pair names could be fetched from a subgraph or off-chain source
+      return {
+        name: `Pair ${pairIndex}`,
+        from: '',
+        to: '',
+        feed: '',
+        spreadP: 0,
+        groupIndex: 0,
+        feeIndex: 0,
+        minLeverage: 0,
+        maxLeverage: 0,
+        minPositionSize: new Decimal(0),
+        maxPositionSize: new Decimal(0),
+        maxOpenInterestLong: new Decimal(0),
+        maxOpenInterestShort: new Decimal(0)
+      };
     } catch (error) {
       throw handleError(error);
     }

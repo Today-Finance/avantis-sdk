@@ -16,14 +16,16 @@ export const NETWORKS: Record<'base' | 'base-sepolia', NetworkConfig> = {
       tradingStorage: '0x8a311D7048c35985aa31C131B9A13e03a5f7422d', // TradingStorage contract
       tradingCallbacks: '0x0000000000000000000000000000000000000000', // TODO: Get TradingCallbacks address
       pairInfos: '0x81F22d0Cc22977c91bEfE648C9fddff1f2bd977e', // PairInfos contract
-      pairStorage: '0x5db3772136e5557EFF028Db05EE95C84D76faEC4', // PairStorage contract
+      pairStorage: '0x5db3772136e5557EFE028Db05EE95C84D76faEC4', // PairStorage contract
       priceAggregator: '0x64e2625621970F8cfA17B294670d61CB883dA511', // PriceAggregator contract
       vaultManager: '0x0000000000000000000000000000000000000000', // TODO: Get VaultManager address
       usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base USDC (Native)
       priceFeed: '0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a', // Pyth Network on Base
       vault: '0x0000000000000000000000000000000000000000', // TODO: Get USDC Vault address
       router: '0x0000000000000000000000000000000000000000', // TODO: Get Trading Router address
-      avnt: '0x696F9436B67233384889472Cd7cD58A6fB5DF4f1' // AVNT Token
+      avnt: '0x696F9436B67233384889472Cd7cD58A6fB5DF4f1', // AVNT Token
+      multicall: '0xb7125506Ff25211c4C51DFD8DdED0DedED0BEE6Fa8Cbf7', // Multicall contract
+      referral: '0x1A110bBA13A1f16cCa4b79758BD39290f29De82D' // Referral contract
     },
     websocketUrl: process.env.BASE_WS_URL || process.env.ALCHEMY_API_KEY
       ? `wss://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`

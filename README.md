@@ -15,10 +15,11 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 ## ✨ Features
 
 - 🚀 **Full Trading Suite**: Market orders, limit orders, stop orders, and position management
-- 🔮 **Pyth Oracle Integration**: Automatic price feed fetching from Pyth Network for all 42 trading pairs
+- 🔮 **Pyth Oracle Integration**: Automatic price feed fetching from Pyth Network for all 89+ trading pairs
 - 💰 **Platform Fee System**: Built-in fee management with referral support and transaction bundling
 - 📊 **Real-time Data**: WebSocket-based live price feeds and market data
-- 💱 **42 Trading Pairs**: Crypto, forex, commodities, and indices with Pyth price feeds
+- 💱 **89+ Trading Pairs**: Crypto, forex, commodities, stocks, and metals with Pyth price feeds
+- 🌐 **Socket API Integration**: Fast, cached access to all market metadata, open interest, and asset filtering
 - 🔐 **Type-Safe**: Full TypeScript with runtime validation using Zod
 - 📱 **Cross-Platform**: Works with Node.js, browsers, and React Native
 - ⚡ **Gas Optimized**: Multicall3 transaction bundling for 30-40% gas savings
@@ -111,12 +112,75 @@ unsubscribe();
 await sdk.feed.disconnect();
 ```
 
+### Socket API - Market Discovery
+
+The SDK uses the **Avantis Socket API** to fetch comprehensive market data for all 89+ trading pairs:
+
+```typescript
+// Get all markets from Socket API (fast, cached, complete)
+const markets = await sdk.getAllMarketsFromAPI();
+console.log(`Found ${markets.length} markets`); // 89+
+
+// Each market includes:
+markets.forEach(market => {
+  console.log({
+    pairIndex: market.pairIndex,
+    name: market.name,                    // e.g., "BTC/USD"
+    maxLeverage: market.maxLeverage,      // e.g., 75
+    spreadPercent: market.spreadPercent,  // Trading spread
+    pythFeedId: market.pythFeedId,        // For price fetching
+    assetType: market.assetType           // Crypto, FX, Equity, etc.
+  });
+});
+
+// Filter by asset type
+const cryptos = await sdk.getMarketsByType('Crypto');    // 57 pairs
+const forex = await sdk.getMarketsByType('FX');          // 17 pairs
+const stocks = await sdk.getMarketsByType('Equity');     // 10 pairs
+
+// Get specific market
+const eth = await sdk.getMarketByIndex(0); // ETH/USD
+console.log(`${eth.name}: ${eth.maxLeverage}x leverage`);
+
+// Get total open interest
+const oi = await sdk.getTotalOpenInterest();
+console.log(`Long OI: $${oi.long}, Short OI: $${oi.short}`);
+```
+
+**Why Socket API?**
+- ✅ **Complete**: All 89+ pairs vs only 4 from on-chain
+- ✅ **Fast**: ~50-100ms with 5-minute cache
+- ✅ **Rich Metadata**: Names, asset types, leverage, spreads
+- ✅ **No RPC Costs**: Doesn't consume blockchain RPC quota
+
+See [docs/SOCKET_API.md](docs/SOCKET_API.md) for full documentation.
+
 ### Pyth Network Oracle Integration
 
 The SDK automatically fetches real-time price data from [Pyth Network](https://pyth.network) oracles, which is required by Avantis smart contracts:
 
 ```typescript
-// Automatic price fetching (default behavior)
+// Get prices for markets using Pyth feed IDs from Socket API
+const markets = await sdk.getAllMarketsFromAPI();
+const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
+
+markets.slice(0, 10).forEach(market => {
+  const priceData = prices.get(market.pythFeedId);
+  if (priceData) {
+    const expo = priceData.expo;
+    const price = expo < 0
+      ? parseFloat(priceData.price) / Math.pow(10, Math.abs(expo))
+      : parseFloat(priceData.price) * Math.pow(10, expo);
+    console.log(`${market.name}: $${price}`);
+  }
+});
+
+// Get single market price
+const btc = await sdk.getMarketByIndex(1); // BTC/USD
+const btcPrice = await sdk.pyth.getLatestPriceByFeedId(btc.pythFeedId);
+
+// Automatic price fetching in trades (default behavior)
 const result = await sdk.trader.openPosition({
   pair: 'BTC/USD',
   side: PositionSide.LONG,
@@ -133,22 +197,6 @@ const result = await sdk.trader.openPosition({
   leverage: 5,
   autofetchPrices: false, // Disable auto-fetch
   priceUpdateData: customPriceData // Provide your own price data
-});
-
-// Direct access to Pyth client
-const pythPrice = await sdk.pyth.getLatestPrice('BTC/USD');
-console.log(`BTC: $${pythPrice.price} (expo: ${pythPrice.expo})`);
-
-// Fetch price update data for multiple pairs
-const priceData = await sdk.pyth.getPriceUpdateDataForPairs([
-  'BTC/USD', 'ETH/USD', 'SOL/USD'
-]);
-
-// Use in transactions
-await sdk.trader.openPosition({
-  pair: 'BTC/USD',
-  // ... other params
-  priceUpdateData: priceData
 });
 ```
 
@@ -175,21 +223,45 @@ import App from './App';
 
 ## 📖 Core Concepts
 
-### Trading Pairs
+### Trading Pairs & Market Data
 
-The SDK supports 40+ trading pairs across different categories:
+The SDK supports **89+ trading pairs** across different asset classes via the Socket API:
 
 ```typescript
-// Get all available pairs
-const allPairs = sdk.trader.getAllPairs();
+// Get all 89+ markets with full metadata (recommended)
+const markets = await sdk.getAllMarketsFromAPI();
+console.log(`Total markets: ${markets.length}`);
 
-// Get pairs by category
-const cryptoPairs = sdk.trader.getPairsByCategory('crypto');
-// Returns: ['BTC/USD', 'ETH/USD', 'SOL/USD', ...]
+markets.forEach(market => {
+  console.log(`${market.name}: ${market.maxLeverage}x leverage, ${market.spreadPercent}% spread`);
+});
 
-const forexPairs = sdk.trader.getPairsByCategory('forex');
-// Returns: ['EUR/USD', 'GBP/USD', 'USD/JPY', ...]
+// Filter by asset type
+const cryptoMarkets = await sdk.getMarketsByType('Crypto'); // 57 crypto pairs
+const forexMarkets = await sdk.getMarketsByType('FX');      // 17 forex pairs
+const stockMarkets = await sdk.getMarketsByType('Equity');  // 10 stock pairs
+const metalMarkets = await sdk.getMarketsByType('Metal');   // 2 metal pairs
+const commodities = await sdk.getMarketsByType('Commodities'); // 1 commodity
+
+// Get available asset types
+const assetTypes = await sdk.getAssetTypes();
+// Returns: ['Crypto', 'FX', 'Equity', 'Metal', 'Commodities']
+
+// Get specific market by index
+const btc = await sdk.getMarketByIndex(1); // BTC/USD
+console.log(`${btc.name}: Max leverage ${btc.maxLeverage}x`);
+
+// Get markets with current Pyth prices
+const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 ```
+
+**Market Breakdown:**
+- 🪙 **Crypto**: 57 pairs (ETH, BTC, SOL, BNB, ARB, DOGE, AVAX, OP, POL, TIA, SEI, SHIB, PEPE, BONK, WIF, and more)
+- 💱 **Forex**: 17 pairs (EUR/USD, GBP/USD, USD/JPY, and major currency pairs)
+- 📈 **Stocks**: 10 pairs (SPY, QQQ, NVDA, AAPL, TSLA, GOOG, AMZN, META, MSFT, COIN)
+- 🥇 **Metals**: 2 pairs (XAU/USD Gold, XAG/USD Silver)
+- 🛢️ **Commodities**: 1 pair (USOILSPOT/USD)
 
 ### Position Management
 

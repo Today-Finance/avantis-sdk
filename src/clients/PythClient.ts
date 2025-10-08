@@ -41,8 +41,12 @@ export class PythClient {
    * @returns Price update data as bytes array
    */
   public async getPriceUpdateData(pair: string): Promise<string[]> {
-    const feedId = getPythFeedId(pair);
-    return await this.getPriceUpdateDataByFeedIds([feedId]);
+    try {
+      const feedId = getPythFeedId(pair);
+      return await this.getPriceUpdateDataByFeedIds([feedId]);
+    } catch (error) {
+      throw new Error(`Failed to get price update data for ${pair}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**
@@ -99,10 +103,25 @@ export class PythClient {
    * @returns Price information
    */
   public async getLatestPrice(pair: string): Promise<PythPriceUpdate> {
-    const feedId = getPythFeedId(pair);
-
     try {
-      const url = `${this.hermesUrl}/api/latest_price_feeds?ids[]=${feedId}`;
+      const feedId = getPythFeedId(pair);
+      return await this.getLatestPriceByFeedId(feedId);
+    } catch (error) {
+      throw new Error(`Failed to get latest price for ${pair}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Gets the latest price by Pyth feed ID (for display/informational purposes)
+   * This method accepts feed IDs directly from contracts
+   * @param feedId - The Pyth feed ID (bytes32 hex string)
+   * @returns Price information
+   */
+  public async getLatestPriceByFeedId(feedId: string): Promise<PythPriceUpdate> {
+    try {
+      // Remove 0x prefix if present for Pyth API
+      const cleanFeedId = feedId.startsWith('0x') ? feedId.slice(2) : feedId;
+      const url = `${this.hermesUrl}/api/latest_price_feeds?ids[]=${cleanFeedId}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -118,8 +137,11 @@ export class PythClient {
       const priceData = data[0];
       const price = priceData.price;
 
+      // Restore 0x prefix for consistency with feed IDs from contracts
+      const feedIdWithPrefix = priceData.id.startsWith('0x') ? priceData.id : `0x${priceData.id}`;
+
       return {
-        feedId: priceData.id,
+        feedId: feedIdWithPrefix,
         price: price.price,
         conf: price.conf,
         expo: price.expo,
@@ -130,6 +152,57 @@ export class PythClient {
         throw new Error(`Failed to fetch Pyth price: ${error.message}`);
       }
       throw new Error('Failed to fetch Pyth price: Unknown error');
+    }
+  }
+
+  /**
+   * Gets latest prices for multiple feed IDs
+   * Useful for batch fetching prices from contract-provided feed IDs
+   * @param feedIds - Array of Pyth feed IDs (bytes32 hex strings)
+   * @returns Map of feed ID to price data
+   */
+  public async getLatestPricesByFeedIds(feedIds: string[]): Promise<Map<string, PythPriceUpdate>> {
+    try {
+      const params = new URLSearchParams();
+      // Remove 0x prefix if present for Pyth API
+      feedIds.forEach(id => {
+        const cleanId = id.startsWith('0x') ? id.slice(2) : id;
+        params.append('ids[]', cleanId);
+      });
+
+      const url = `${this.hermesUrl}/api/latest_price_feeds?${params.toString()}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Pyth API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error('Invalid response from Pyth');
+      }
+
+      const priceMap = new Map<string, PythPriceUpdate>();
+      for (const priceData of data) {
+        const price = priceData.price;
+        // Restore 0x prefix for consistency with feed IDs from contracts
+        const feedIdWithPrefix = priceData.id.startsWith('0x') ? priceData.id : `0x${priceData.id}`;
+        priceMap.set(feedIdWithPrefix, {
+          feedId: feedIdWithPrefix,
+          price: price.price,
+          conf: price.conf,
+          expo: price.expo,
+          publishTime: price.publish_time
+        });
+      }
+
+      return priceMap;
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Failed to fetch Pyth prices: ${error.message}`);
+      }
+      throw new Error('Failed to fetch Pyth prices: Unknown error');
     }
   }
 

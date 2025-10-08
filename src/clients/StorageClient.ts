@@ -12,6 +12,7 @@ import { TradingStorageContractABI, PairStorageContractABI } from '../contracts'
 import { formatUSDC } from '../utils/formatting';
 import { handleError } from '../utils/errors';
 import { NETWORKS } from '../constants/networks';
+import type { PairStorageData, MarketData } from '../types/market';
 
 export class StorageClient {
   private blockchain: BlockchainProvider;
@@ -171,8 +172,109 @@ export class StorageClient {
       if (!this.pairStorageContract) {
         return false;
       }
-      
+
       return await this.pairStorageContract.isPairListed(pairIndex);
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Gets the total number of pairs available
+   */
+  public async getPairsCount(): Promise<number> {
+    try {
+      if (!this.pairStorageContract) {
+        return 0;
+      }
+
+      const count = await this.pairStorageContract.pairsCount();
+      return Number(count);
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Gets full pair data from the PairStorage contract
+   * This includes feed IDs, leverage limits, spreads, etc.
+   */
+  public async getPairData(pairIndex: number): Promise<PairStorageData> {
+    try {
+      if (!this.pairStorageContract) {
+        throw new Error('PairStorage contract not available');
+      }
+
+      const pairData = await this.pairStorageContract.pairs(pairIndex);
+
+      return {
+        pairIndex,
+        feed: {
+          maxOpenDeviationP: Number(pairData.feed.maxOpenDeviationP),
+          maxCloseDeviationP: Number(pairData.feed.maxCloseDeviationP),
+          feedId: pairData.feed.feedId // bytes32 Pyth feed ID
+        },
+        backupFeed: {
+          maxDeviationP: Number(pairData.backupFeed.maxDeviationP),
+          feedId: pairData.backupFeed.feedId // address
+        },
+        spreadP: Number(pairData.spreadP),
+        pnlSpreadP: Number(pairData.pnlSpreadP),
+        leverages: {
+          minLeverage: Number(pairData.leverages.minLeverage),
+          maxLeverage: Number(pairData.leverages.maxLeverage),
+          pnlMinLeverage: Number(pairData.leverages.pnlMinLeverage),
+          pnlMaxLeverage: Number(pairData.leverages.pnlMaxLeverage)
+        },
+        priceImpactMultiplier: Number(pairData.priceImpactMultiplier),
+        skewImpactMultiplier: Number(pairData.skewImpactMultiplier),
+        groupIndex: Number(pairData.groupIndex),
+        feeIndex: Number(pairData.feeIndex),
+        values: {
+          maxGainP: Number(pairData.values.maxGainP),
+          maxSlP: Number(pairData.values.maxSlP),
+          maxLongOiP: Number(pairData.values.maxLongOiP),
+          maxShortOiP: Number(pairData.values.maxShortOiP),
+          groupOpenInterestPecentage: Number(pairData.values.groupOpenInterestPecentage),
+          maxWalletOI: Number(pairData.values.maxWalletOI),
+          isUSDCAligned: pairData.values.isUSDCAligned
+        }
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Gets all pair data from the contract dynamically
+   * Only returns pairs with valid Pyth feed IDs
+   */
+  public async getAllPairsData(): Promise<PairStorageData[]> {
+    try {
+      if (!this.pairStorageContract) {
+        return [];
+      }
+
+      const count = await this.getPairsCount();
+      const pairsData: PairStorageData[] = [];
+
+      console.log(`Fetching ${count} pairs from PairStorage contract...`);
+
+      for (let i = 0; i < count; i++) {
+        try {
+          const pairData = await this.getPairData(i);
+          // Only add pairs with valid feed IDs
+          if (pairData.feed.feedId && pairData.feed.feedId !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            pairsData.push(pairData);
+          }
+        } catch (error) {
+          // Silently skip pairs that fail (likely don't exist yet)
+          // This is expected for indices that haven't been initialized
+        }
+      }
+
+      console.log(`Successfully fetched ${pairsData.length} valid pairs out of ${count} total`);
+      return pairsData;
     } catch (error) {
       throw handleError(error);
     }

@@ -7,6 +7,7 @@ export { FeedClient } from './clients/FeedClient';
 export { StorageClient } from './clients/StorageClient';
 export { PriceClient } from './clients/PriceClient';
 export { PythClient } from './clients/PythClient';
+export { SocketAPIClient } from './clients/SocketAPIClient';
 
 // Fee management exports
 export { FeeManager } from './fees/FeeManager';
@@ -19,6 +20,7 @@ export { WebSocketProvider } from './providers/WebSocketProvider';
 
 // Type exports
 export * from './types';
+export * from './types/socket-api';
 
 // Utility exports
 export * from './utils';
