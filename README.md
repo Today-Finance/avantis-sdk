@@ -263,6 +263,27 @@ const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 - 🥇 **Metals**: 2 pairs (XAU/USD Gold, XAG/USD Silver)
 - 🛢️ **Commodities**: 1 pair (USOILSPOT/USD)
 
+#### Getting Pair Indices Dynamically
+
+**Important:** Pair indices are fetched dynamically from the Socket API. Never hardcode pair indices as they may change.
+
+```typescript
+// Get pair index dynamically (recommended)
+const ethIndex = await sdk.getPairIndexByName('ETH/USD'); // Returns: 0
+const btcIndex = await sdk.getPairIndexByName('BTC/USD'); // Returns: 1
+
+// Get pair name from index
+const pairName = await sdk.getPairNameByIndex(1); // Returns: "BTC/USD"
+
+// When trading, use pair names (indices are resolved automatically)
+await sdk.trader.openPosition({
+  pair: 'ETH/USD',  // ✅ Use names, not indices
+  side: PositionSide.LONG,
+  size: 1000,
+  leverage: 10
+});
+```
+
 ### Position Management
 
 ```typescript
@@ -313,7 +334,7 @@ const limitOrder = await sdk.trader.openPosition({
 
 // Update limit order
 await sdk.trader.updateLimitOrder({
-  pairIndex: 1,
+  pairIndex: 1, // BTC/USD (get dynamically via sdk.getPairIndexByName('BTC/USD'))
   orderIndex: 0,
   price: 2940, // New limit price
   takeProfit: 3250,
@@ -322,7 +343,7 @@ await sdk.trader.updateLimitOrder({
 
 // Cancel limit order
 await sdk.trader.cancelLimitOrder({
-  pairIndex: 1,
+  pairIndex: 1, // BTC/USD (get dynamically via sdk.getPairIndexByName('BTC/USD'))
   orderIndex: 0
 });
 ```
@@ -517,9 +538,20 @@ await sdk.setSigner({
 ### Main Classes
 
 - **`AvantisSDK`**: Main SDK wrapper class
+  - `getPairIndexByName(name)` - Get dynamic pair index from Socket API
+  - `getPairNameByIndex(index)` - Get pair name from index
+  - `getAllPairNames()` - Get all available pair names
+  - `getAllMarketsFromAPI()` - Get all 89+ markets with metadata
+  - `getMarketsByType(type)` - Filter markets by asset type
+  - `getMarketByIndex(index)` - Get specific market data
 - **`TraderClient`**: Trading operations and position management
+  - `getPairIndexFromAPI(name)` - Get accurate pair index (use instead of deprecated `getPairIndex()`)
+  - `getPairNameFromAPI(index)` - Get pair name (use instead of deprecated `getPairName()`)
+  - `getAllPairsFromAPI()` - Get all pairs (use instead of deprecated `getAllPairs()`)
+  - All trading methods now use Socket API for accurate pair indices
 - **`FeedClient`**: Real-time price feeds and market data
 - **`PythClient`**: Pyth Network oracle price data fetching
+- **`SocketAPIClient`**: Socket API for market metadata (89+ pairs)
 - **`StorageClient`**: On-chain storage interactions
 - **`PriceClient`**: Price aggregation and oracles
 - **`FeeManager`**: Platform fee calculations
@@ -527,6 +559,14 @@ await sdk.setSigner({
 
 ### Key Types
 
+- **`MarketData`**: Complete market information (from Socket API)
+  - `pairIndex`, `name`, `from`, `to`
+  - `pythFeedId` - Pyth price feed ID
+  - `maxLeverage`, `minLeverage` - Leverage limits
+  - `spreadPercent` - Trading spread
+  - `minPositionSizeUSDC`, `maxPositionSizeUSDC` - Position size limits
+  - `maxOpenInterestLong`, `maxOpenInterestShort` - OI limits
+  - `currentPrice?` - Optional current Pyth price data
 - **`Position`**: Open position data
 - **`OpenPositionParams`**: Parameters for opening positions (with `autofetchPrices` and `priceUpdateData`)
 - **`ClosePositionParams`**: Parameters for closing positions (with Pyth support)

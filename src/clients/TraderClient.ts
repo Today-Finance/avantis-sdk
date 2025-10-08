@@ -56,6 +56,7 @@ import { FeeManager } from '../fees/FeeManager';
 import { MulticallBundler } from '../fees/MulticallBundler';
 import type { PlatformFeeConfig, PlatformFeeParams, FeeBreakdown } from '../types/platform-fees';
 import { PythClient } from './PythClient';
+import { SocketAPIClient } from './SocketAPIClient';
 
 export class TraderClient extends EventEmitter {
   private blockchain: BlockchainProvider;
@@ -66,6 +67,7 @@ export class TraderClient extends EventEmitter {
   private feeManager?: FeeManager;
   private multicallBundler?: MulticallBundler;
   private pythClient: PythClient;
+  private socketAPI: SocketAPIClient;
 
   constructor(
     networkName: keyof typeof NETWORKS = 'base',
@@ -87,6 +89,9 @@ export class TraderClient extends EventEmitter {
     this.pythClient = new PythClient({
       network: networkName === 'base-sepolia' ? 'testnet' : 'mainnet'
     });
+
+    // Initialize Socket API client for dynamic pair data
+    this.socketAPI = new SocketAPIClient();
 
     this.initializeContracts();
   }
@@ -274,7 +279,7 @@ export class TraderClient extends EventEmitter {
     try {
       // Validate parameters
       const validated = validate(OpenPositionParamsSchema, params);
-      
+
       // Check if trading contract is available
       if (!this.tradingContract) {
         throw new TradingError(
@@ -282,9 +287,9 @@ export class TraderClient extends EventEmitter {
           'Trading contract not deployed on this network'
         );
       }
-      
-      // Get pair index using our pair mapping
-      const pairIndex = getPairIndex(params.pair);
+
+      // Get pair index from Socket API (dynamic, accurate)
+      const pairIndex = await this.getPairIndexFromAPI(params.pair);
       
       // Get pair configuration
       const pairConfig = TRADING_PAIRS[params.pair as keyof typeof TRADING_PAIRS];
@@ -485,8 +490,8 @@ export class TraderClient extends EventEmitter {
       // Determine close amount (0 means close full position)
       const closeAmount = params.size ? toUSDCUnits(params.size) : 0;
 
-      // Get pair name for Pyth price data
-      const pairName = getPairName(pairIndex);
+      // Get pair name from Socket API for Pyth price data
+      const pairName = await this.getPairNameFromAPI(pairIndex);
 
       // Get Pyth price update data
       const autofetch = params.autofetchPrices !== false; // Default to true
@@ -558,8 +563,8 @@ export class TraderClient extends EventEmitter {
       const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0n;
       const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0n;
 
-      // Get pair name for Pyth price data
-      const pairName = getPairName(pairIndex);
+      // Get pair name from Socket API for Pyth price data
+      const pairName = await this.getPairNameFromAPI(pairIndex);
 
       // Get Pyth price update data
       const autofetch = params.autofetchPrices !== false; // Default to true
@@ -646,14 +651,14 @@ export class TraderClient extends EventEmitter {
     try {
       const addr = address || await this.getAddress();
 
-      // Get all trading pairs
-      const pairs = getAllPairs();
+      // Get all trading pairs from Socket API
+      const markets = await this.socketAPI.getAllMarkets();
       const positions: Position[] = [];
 
       // For each pair, check for open positions (indices 0-2 typically max 3 positions per pair)
       // This is a limitation - ideally we'd have a way to query all positions directly
-      for (const pairName of pairs) {
-        const pairIndex = getPairIndex(pairName);
+      for (const market of markets) {
+        const pairIndex = market.pairIndex;
 
         // Check up to 10 potential position indices per pair
         for (let i = 0; i < 10; i++) {
@@ -675,7 +680,7 @@ export class TraderClient extends EventEmitter {
    * Parses position data from contract and enriches with calculations
    */
   private async parsePositionData(trade: any, pairIndex: number, positionIndex: number): Promise<Position> {
-    const pairName = getPairName(pairIndex);
+    const pairName = await this.getPairNameFromAPI(pairIndex);
     const side = trade.buy ? PositionSide.LONG : PositionSide.SHORT;
     const collateral = new Decimal(formatUSDC(trade.initialPosToken));
     const leverage = Number(trade.leverage);
@@ -836,31 +841,83 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
-   * Gets the pair index for a given pair name
+   * Gets the pair index for a given pair name (DEPRECATED - uses hardcoded mapping)
+   * @deprecated Use getPairIndexFromAPI() instead for accurate pair indices
    */
   public getPairIndex(pairName: string): number {
+    console.warn('[DEPRECATED] getPairIndex() uses hardcoded pair mappings. Use getPairIndexFromAPI() for accurate indices.');
     return getPairIndex(pairName);
   }
-  
+
   /**
-   * Gets the pair name for a given index
+   * Gets the pair name for a given index (DEPRECATED - uses hardcoded mapping)
+   * @deprecated Use getPairNameFromAPI() instead for accurate pair names
    */
   public getPairName(index: number): string {
+    console.warn('[DEPRECATED] getPairName() uses hardcoded pair mappings. Use getPairNameFromAPI() for accurate names.');
     return getPairName(index);
   }
-  
+
   /**
-   * Gets all available trading pairs
+   * Gets all available trading pairs (DEPRECATED - uses hardcoded mapping)
+   * @deprecated Use getAllPairsFromAPI() instead for all 89+ pairs
    */
   public getAllPairs(): string[] {
+    console.warn('[DEPRECATED] getAllPairs() returns hardcoded pairs. Use getAllPairsFromAPI() for all 89+ pairs.');
     return getAllPairs();
   }
-  
+
   /**
-   * Gets pairs by category
+   * Gets pairs by category (DEPRECATED - uses hardcoded mapping)
+   * @deprecated Use Socket API methods via AvantisSDK.getMarketsByType() instead
    */
   public getPairsByCategory(category: 'crypto' | 'forex' | 'commodity' | 'index'): string[] {
+    console.warn('[DEPRECATED] getPairsByCategory() uses hardcoded pairs. Use AvantisSDK.getMarketsByType() instead.');
     return getPairsByCategory(category);
+  }
+
+  /**
+   * Gets the pair index for a given pair name from Socket API (dynamic, accurate)
+   * @param pairName - The pair name (e.g., "ETH/USD", "BTC/USD")
+   * @returns The pair index or throws error if not found
+   */
+  public async getPairIndexFromAPI(pairName: string): Promise<number> {
+    const markets = await this.socketAPI.getAllMarkets();
+    const market = markets.find(m => m.name.toUpperCase() === pairName.toUpperCase());
+    if (!market) {
+      throw new TradingError(
+        ErrorCode.INVALID_PAIR,
+        `Trading pair not found: ${pairName}`,
+        pairName
+      );
+    }
+    return market.pairIndex;
+  }
+
+  /**
+   * Gets the pair name for a given index from Socket API (dynamic, accurate)
+   * @param index - The pair index
+   * @returns The pair name or throws error if not found
+   */
+  public async getPairNameFromAPI(index: number): Promise<string> {
+    const market = await this.socketAPI.getMarket(index);
+    if (!market) {
+      throw new TradingError(
+        ErrorCode.INVALID_PAIR,
+        `Pair index not found: ${index}`,
+        index.toString()
+      );
+    }
+    return market.name;
+  }
+
+  /**
+   * Gets all available trading pairs from Socket API (89+ pairs)
+   * @returns Array of all pair names
+   */
+  public async getAllPairsFromAPI(): Promise<string[]> {
+    const markets = await this.socketAPI.getAllMarkets();
+    return markets.map(m => m.name);
   }
 
   /**
@@ -935,8 +992,8 @@ export class TraderClient extends EventEmitter {
         );
       }
       
-      // Get pair configuration
-      const pairIndex = getPairIndex(params.pair);
+      // Get pair configuration from Socket API
+      const pairIndex = await this.getPairIndexFromAPI(params.pair);
       const pairConfig = TRADING_PAIRS[params.pair as keyof typeof TRADING_PAIRS];
       if (!pairConfig) {
         throw new TradingError(
@@ -1149,8 +1206,8 @@ export class TraderClient extends EventEmitter {
 
       const amountUnits = toUSDCUnits(params.amount);
 
-      // Get pair name for Pyth price data
-      const pairName = getPairName(params.pairIndex);
+      // Get pair name from Socket API for Pyth price data
+      const pairName = await this.getPairNameFromAPI(params.pairIndex);
 
       // Get Pyth price update data
       const autofetch = params.autofetchPrices !== false; // Default to true
@@ -1272,9 +1329,9 @@ export class TraderClient extends EventEmitter {
       const orders: PendingLimitOrder[] = [];
 
       // For each pair, check for pending limit orders
-      const pairs = getAllPairs();
-      for (const pairName of pairs) {
-        const pairIndex = getPairIndex(pairName);
+      const markets = await this.socketAPI.getAllMarkets();
+      for (const market of markets) {
+        const pairIndex = market.pairIndex;
 
         // Check up to 3 potential order indices per pair
         for (let i = 0; i < 3; i++) {

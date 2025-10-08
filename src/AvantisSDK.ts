@@ -280,4 +280,37 @@ export class AvantisSDK {
   public getVersion(): string {
     return '1.0.0';
   }
+
+  /**
+   * Gets the pair index for a given pair name from the Socket API
+   * @param pairName - The pair name (e.g., "ETH/USD", "BTC/USD")
+   * @param useCache - Whether to use cached data (default: true)
+   * @returns The pair index or null if not found
+   */
+  public async getPairIndexByName(pairName: string, useCache: boolean = true): Promise<number | null> {
+    const markets = await this.getAllMarketsFromAPI(useCache);
+    const market = markets.find(m => m.name.toUpperCase() === pairName.toUpperCase());
+    return market ? market.pairIndex : null;
+  }
+
+  /**
+   * Gets the pair name for a given index from the Socket API
+   * @param pairIndex - The pair index
+   * @param useCache - Whether to use cached data (default: true)
+   * @returns The pair name or null if not found
+   */
+  public async getPairNameByIndex(pairIndex: number, useCache: boolean = true): Promise<string | null> {
+    const market = await this.getMarketByIndex(pairIndex, useCache);
+    return market ? market.name : null;
+  }
+
+  /**
+   * Gets all pair names from the Socket API
+   * @param useCache - Whether to use cached data (default: true)
+   * @returns Array of all pair names
+   */
+  public async getAllPairNames(useCache: boolean = true): Promise<string[]> {
+    const markets = await this.getAllMarketsFromAPI(useCache);
+    return markets.map(m => m.name);
+  }
 }
