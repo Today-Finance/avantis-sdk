@@ -13,7 +13,7 @@ import type {
 
 export class SocketAPIClient {
   private readonly apiUrl: string;
-  private cache: Map<number, MarketData> = new Map();
+  private cache: Map<number, any> = new Map();
   private allMarketsCache: MarketData[] | null = null;
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -80,12 +80,12 @@ export class SocketAPIClient {
       const response = await this.fetchSocketData();
 
       const pairInfos = response.data.pairInfos;
-      const markets: MarketData[] = [];
+      const markets: any[] = [];
 
       // Convert all pairs to MarketData
       for (const [index, pairInfo] of Object.entries(pairInfos)) {
         if (pairInfo && pairInfo.from && pairInfo.to) {
-          const market = this.convertToMarketData(pairInfo);
+          const market = pairInfo;
           markets.push(market);
           this.cache.set(parseInt(index), market);
         }
