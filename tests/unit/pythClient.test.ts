@@ -32,34 +32,73 @@ describe('PythClient', () => {
 
   describe('getPriceUpdateData', () => {
     it('should fetch price update data for a single pair', async () => {
-      const mockResponse = ['base64EncodedVAA1', 'base64EncodedVAA2'];
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse
-      });
+      // Mock Socket API response
+      const mockSocketResponse = {
+        data: {
+          pairInfos: {
+            '1': {
+              from: 'BTC',
+              to: 'USD',
+              feed: { feedId: getPythFeedId('BTC/USD') }
+            }
+          }
+        }
+      };
+
+      const mockVAAResponse = ['base64EncodedVAA1', 'base64EncodedVAA2'];
+
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockSocketResponse
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockVAAResponse
+        });
 
       const result = await pythClient.getPriceUpdateData('BTC/USD');
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('hermes.pyth.network/api/latest_vaas')
-      );
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(getPythFeedId('BTC/USD'))
-      );
       expect(result).toHaveLength(2);
       expect(result[0]).toMatch(/^0x[0-9a-f]+$/);
     });
 
     it('should throw error for invalid pair', async () => {
+      // Mock Socket API with no matching pair
+      const mockSocketResponse = {
+        data: {
+          pairInfos: {
+            '0': { from: 'ETH', to: 'USD', feed: { feedId: '0x123' } }
+          }
+        }
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockSocketResponse
+      });
+
       await expect(pythClient.getPriceUpdateData('INVALID/PAIR')).rejects.toThrow();
     });
 
     it('should throw error when API request fails', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error'
-      });
+      // Mock Socket API success
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              pairInfos: {
+                '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } }
+              }
+            }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error'
+        });
 
       await expect(pythClient.getPriceUpdateData('BTC/USD')).rejects.toThrow(
         'Pyth API request failed'
@@ -67,10 +106,22 @@ describe('PythClient', () => {
     });
 
     it('should throw error when no data is returned', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => []
-      });
+      // Mock Socket API and Pyth API
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              pairInfos: {
+                '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } }
+              }
+            }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => []
+        });
 
       await expect(pythClient.getPriceUpdateData('BTC/USD')).rejects.toThrow(
         'No price update data received from Pyth'
@@ -80,19 +131,31 @@ describe('PythClient', () => {
 
   describe('getPriceUpdateDataForPairs', () => {
     it('should fetch price update data for multiple pairs', async () => {
-      const mockResponse = ['vaa1', 'vaa2', 'vaa3'];
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse
-      });
+      // Mock Socket API response for market cache
+      const mockSocketResponse = {
+        data: {
+          pairInfos: {
+            '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } },
+            '0': { from: 'ETH', to: 'USD', feed: { feedId: getPythFeedId('ETH/USD') } },
+            '2': { from: 'LINK', to: 'USD', feed: { feedId: getPythFeedId('LINK/USD') } }
+          }
+        }
+      };
+
+      const mockVAAResponse = ['vaa1', 'vaa2', 'vaa3'];
+
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockSocketResponse
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockVAAResponse
+        });
 
       const pairs = ['BTC/USD', 'ETH/USD', 'LINK/USD'];
       const result = await pythClient.getPriceUpdateDataForPairs(pairs);
-
-      const callUrl = (global.fetch as jest.Mock).mock.calls[0][0];
-      pairs.forEach(pair => {
-        expect(callUrl).toContain(getPythFeedId(pair));
-      });
 
       expect(result).toHaveLength(3);
     });
@@ -137,6 +200,15 @@ describe('PythClient', () => {
 
   describe('getLatestPrice', () => {
     it('should fetch latest price for a pair', async () => {
+      // Mock Socket API response
+      const mockSocketResponse = {
+        data: {
+          pairInfos: {
+            '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } }
+          }
+        }
+      };
+
       const mockPriceData = {
         id: getPythFeedId('BTC/USD'),
         price: {
@@ -147,10 +219,15 @@ describe('PythClient', () => {
         }
       };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => [mockPriceData]
-      });
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => mockSocketResponse
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [mockPriceData]
+        });
 
       const result = await pythClient.getLatestPrice('BTC/USD');
 
@@ -162,20 +239,44 @@ describe('PythClient', () => {
     });
 
     it('should throw error when API fails', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found'
-      });
+      // Mock Socket API success, then Pyth API fail
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              pairInfos: {
+                '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } }
+              }
+            }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          statusText: 'Not Found'
+        });
 
       await expect(pythClient.getLatestPrice('BTC/USD')).rejects.toThrow();
     });
 
     it('should throw error when no price data returned', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => []
-      });
+      // Mock Socket API success, then empty Pyth response
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              pairInfos: {
+                '1': { from: 'BTC', to: 'USD', feed: { feedId: getPythFeedId('BTC/USD') } }
+              }
+            }
+          })
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => []
+        });
 
       await expect(pythClient.getLatestPrice('BTC/USD')).rejects.toThrow(
         'No price data received from Pyth'

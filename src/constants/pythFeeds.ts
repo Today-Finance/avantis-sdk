@@ -1,6 +1,23 @@
 /**
- * Pyth Network Price Feed IDs for all Avantis trading pairs
- * These IDs are used to fetch price update data from the Pyth Hermes API
+ * Pyth Network Price Feed IDs for Avantis trading pairs
+ *
+ * ⚠️ DEPRECATED: This hardcoded mapping is maintained for backward compatibility only.
+ *
+ * The PythClient now dynamically fetches market data from the Socket API,
+ * which automatically supports all current and future trading pairs.
+ *
+ * Recommended usage:
+ * ```typescript
+ * // ✅ Dynamic (automatically supports all markets)
+ * const price = await sdk.pyth.getLatestPrice('TRUMP/USD');
+ *
+ * // ✅ Or fetch from Socket API first
+ * const markets = await sdk.getAllMarketsFromAPI();
+ * const market = markets.find(m => m.name === 'TRUMP/USD');
+ * const price = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
+ * ```
+ *
+ * This file will be removed in a future major version.
  *
  * Pyth Contract on Base: 0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a
  */

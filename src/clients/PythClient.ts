@@ -21,10 +21,16 @@ export interface PythPriceUpdate {
 export interface PythClientConfig {
   hermesUrl?: string;
   network?: 'mainnet' | 'testnet';
+  socketApiUrl?: string;
 }
 
 export class PythClient {
   private readonly hermesUrl: string;
+  private readonly socketApiUrl: string;
+  private marketCache?: Map<string, string>; // pair name -> feed ID
+  private cacheTimestamp: number = 0;
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private cacheRefreshPromise?: Promise<void>; // Prevent concurrent cache refreshes
 
   /**
    * Creates a new PythClient instance
@@ -33,16 +39,18 @@ export class PythClient {
   constructor(config: PythClientConfig = {}) {
     // Use mainnet Hermes by default
     this.hermesUrl = config.hermesUrl || 'https://hermes.pyth.network';
+    this.socketApiUrl = config.socketApiUrl || 'https://socket-api.avantisfi.com/v1/data';
   }
 
   /**
    * Fetches price update data for a single trading pair
-   * @param pair - The trading pair name (e.g., 'BTC/USD')
+   * Dynamically fetches the feed ID from Socket API
+   * @param pair - The trading pair name (e.g., 'BTC/USD', 'TRUMP/USD')
    * @returns Price update data as bytes array
    */
   public async getPriceUpdateData(pair: string): Promise<string[]> {
     try {
-      const feedId = getPythFeedId(pair);
+      const feedId = await this.getFeedIdForPair(pair);
       return await this.getPriceUpdateDataByFeedIds([feedId]);
     } catch (error) {
       throw new Error(`Failed to get price update data for ${pair}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -51,11 +59,12 @@ export class PythClient {
 
   /**
    * Fetches price update data for multiple trading pairs
+   * Dynamically fetches feed IDs from Socket API
    * @param pairs - Array of trading pair names
    * @returns Price update data as bytes array
    */
   public async getPriceUpdateDataForPairs(pairs: string[]): Promise<string[]> {
-    const feedIds = getPythFeedIds(pairs);
+    const feedIds = await Promise.all(pairs.map(pair => this.getFeedIdForPair(pair)));
     return await this.getPriceUpdateDataByFeedIds(feedIds);
   }
 
@@ -99,16 +108,97 @@ export class PythClient {
   /**
    * Gets the latest price for a trading pair (for display/informational purposes)
    * Note: This does NOT return update data needed for transactions
-   * @param pair - The trading pair name
+   * This method dynamically fetches the feed ID from Socket API
+   * @param pair - The trading pair name (e.g., 'BTC/USD', 'TRUMP/USD')
    * @returns Price information
    */
   public async getLatestPrice(pair: string): Promise<PythPriceUpdate> {
     try {
-      const feedId = getPythFeedId(pair);
+      const feedId = await this.getFeedIdForPair(pair);
       return await this.getLatestPriceByFeedId(feedId);
     } catch (error) {
       throw new Error(`Failed to get latest price for ${pair}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Dynamically fetches the Pyth feed ID for a trading pair from Socket API
+   * Uses caching to minimize API calls
+   * @param pair - The trading pair name (e.g., 'BTC/USD')
+   * @returns The Pyth feed ID
+   */
+  private async getFeedIdForPair(pair: string): Promise<string> {
+    // Check if cache needs refresh
+    if (!this.marketCache || Date.now() - this.cacheTimestamp > this.CACHE_TTL_MS) {
+      // If a refresh is already in progress, wait for it
+      if (this.cacheRefreshPromise) {
+        await this.cacheRefreshPromise;
+      } else {
+        await this.refreshMarketCache();
+      }
+    }
+
+    const feedId = this.marketCache?.get(pair);
+    if (!feedId) {
+      // Try the legacy hardcoded map as fallback
+      try {
+        return getPythFeedId(pair);
+      } catch {
+        throw new Error(
+          `Market not found: ${pair}\n` +
+          `Available markets: ${Array.from(this.marketCache?.keys() || []).join(', ')}`
+        );
+      }
+    }
+    return feedId;
+  }
+
+  /**
+   * Refreshes the market cache from Socket API
+   * @private
+   */
+  private async refreshMarketCache(): Promise<void> {
+    // Prevent concurrent refreshes
+    if (this.cacheRefreshPromise) {
+      return this.cacheRefreshPromise;
+    }
+
+    this.cacheRefreshPromise = (async () => {
+      try {
+        const response = await fetch(this.socketApiUrl);
+        if (!response.ok) {
+          throw new Error(`Socket API request failed: ${response.status} ${response.statusText}`);
+        }
+
+        const data: any = await response.json();
+        const pairInfos = data.data.pairInfos;
+
+        this.marketCache = new Map();
+
+        // Build map of pair name -> feed ID
+        for (const [index, pairInfo] of Object.entries(pairInfos)) {
+          if (pairInfo && (pairInfo as any).from && (pairInfo as any).to) {
+            const pair = pairInfo as any;
+            const pairName = `${pair.from}/${pair.to}`;
+            const feedId = pair.feed.feedId;
+            this.marketCache.set(pairName, feedId);
+          }
+        }
+
+        this.cacheTimestamp = Date.now();
+        console.log(`Refreshed market cache: ${this.marketCache.size} markets available`);
+      } catch (error) {
+        console.warn('Failed to refresh market cache from Socket API:', error instanceof Error ? error.message : error);
+        // If cache refresh fails, keep using old cache if available
+        if (!this.marketCache) {
+          throw new Error('Failed to initialize market cache and no fallback available');
+        }
+      } finally {
+        this.cacheRefreshPromise = undefined;
+      }
+    })();
+
+    return this.cacheRefreshPromise;
   }
 
   /**

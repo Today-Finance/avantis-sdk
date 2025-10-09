@@ -15,10 +15,10 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 ## ✨ Features
 
 - 🚀 **Full Trading Suite**: Market orders, limit orders, stop orders, and position management
-- 🔮 **Pyth Oracle Integration**: Automatic price feed fetching from Pyth Network for all 89+ trading pairs
+- 🔮 **Dynamic Price Feeds**: Automatically supports ALL current and future Avantis markets via Socket API integration
 - 💰 **Platform Fee System**: Built-in fee management with referral support and transaction bundling
 - 📊 **Real-time Data**: WebSocket-based live price feeds and market data
-- 💱 **89+ Trading Pairs**: Crypto, forex, commodities, stocks, and metals with Pyth price feeds
+- 💱 **89+ Trading Pairs**: Crypto, forex, commodities, stocks, and metals - automatically updated
 - 🌐 **Socket API Integration**: Fast, cached access to all market metadata, open interest, and asset filtering
 - 🔐 **Type-Safe**: Full TypeScript with runtime validation using Zod
 - 📱 **Cross-Platform**: Works with Node.js, browsers, and React Native
@@ -96,22 +96,42 @@ const result = await sdk.trader.openPositionWithFees({
 
 > **Note**: Avantis does not provide a public REST API for price feeds, volume, or market statistics. Use Pyth Network for price data and Socket API for open interest.
 
+The SDK now **dynamically fetches all markets** from the Socket API, meaning it automatically supports **all current and future trading pairs** without requiring updates.
+
 ```typescript
-// Get current prices using Pyth Network (recommended)
-const market = await sdk.getMarketByIndex(0); // ETH/USD
-const priceData = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
+// ✅ Method 1: Dynamic price fetching (recommended - supports ALL 89+ pairs)
+// Works for ANY pair including new memecoins like TRUMP/USD, HYPE/USD, etc.
+const trumpPrice = await sdk.pyth.getLatestPrice('TRUMP/USD');
+const btcPrice = await sdk.pyth.getLatestPrice('BTC/USD');
+const nvdaPrice = await sdk.pyth.getLatestPrice('NVDA/USD');
 
 // Convert Pyth price format to readable price
-const price = priceData.expo < 0
-  ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
-  : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
+const price = trumpPrice.expo < 0
+  ? parseFloat(trumpPrice.price) / Math.pow(10, Math.abs(trumpPrice.expo))
+  : parseFloat(trumpPrice.price) * Math.pow(10, trumpPrice.expo);
 
-console.log(`${market.name}: $${price}`);
+console.log(`TRUMP/USD: $${price}`);
 
-// Get multiple prices at once
+// ✅ Method 2: Fetch from Socket API first (for additional metadata)
+const markets = await sdk.getAllMarketsFromAPI();
+const trump = markets.find(m => m.name === 'TRUMP/USD');
+const priceData = await sdk.pyth.getLatestPriceByFeedId(trump.pythFeedId);
+
+// ✅ Method 3: Batch price fetching for multiple pairs
 const markets = await sdk.getAllMarketsFromAPI();
 const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
 const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
+
+// Access prices by feed ID
+markets.slice(0, 10).forEach(market => {
+  const priceData = prices.get(market.pythFeedId);
+  if (priceData) {
+    const price = priceData.expo < 0
+      ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
+      : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
+    console.log(`${market.name}: $${price}`);
+  }
+});
 ```
 
 ### Socket API - Market Discovery
