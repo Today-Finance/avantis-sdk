@@ -67,6 +67,9 @@ export class TraderClient extends EventEmitter {
   private multicallBundler?: MulticallBundler;
   private pythClient: PythClient;
   private socketAPI: SocketAPIClient;
+  private marketConfigCache?: Map<string, any>; // Cache for market configs
+  private marketCacheTimestamp: number = 0;
+  private readonly MARKET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     networkName: keyof typeof NETWORKS = 'base',
@@ -285,19 +288,10 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      // Get pair index from Socket API (dynamic, accurate)
-      const pairIndex = await this.getPairIndexFromAPI(params.pair);
-      
-      // Get pair configuration
-      const pairConfig = TRADING_PAIRS[params.pair as keyof typeof TRADING_PAIRS];
-      if (!pairConfig) {
-        throw new TradingError(
-          ErrorCode.INVALID_PAIR,
-          `Trading pair not supported: ${params.pair}`,
-          params.pair
-        );
-      }
-      
+      // Get market configuration from Socket API (dynamic, always up-to-date)
+      const marketConfig = await this.getMarketConfig(params.pair);
+      const pairIndex = marketConfig.pairIndex;
+
       // Determine order type
       const orderType = params.orderType || OrderType.MARKET;
       let orderTypeValue: number;
@@ -327,15 +321,15 @@ export class TraderClient extends EventEmitter {
           orderTypeValue = OrderTypeValue.MARKET;
       }
       
-      // Validate position size
+      // Validate position size using dynamic minimums from Socket API
       const size = validatePositionSize(
         params.size,
-        new Decimal(pairConfig.minSize),
-        new Decimal(pairConfig.maxSize)
+        marketConfig.minPositionSizeUSDC,
+        marketConfig.maxPositionSizeUSDC.gt(0) ? marketConfig.maxPositionSizeUSDC : new Decimal(1000000)
       );
-      
-      // Validate leverage
-      validateLeverage(params.leverage, pairConfig.maxLeverage);
+
+      // Validate leverage using dynamic maximums from Socket API
+      validateLeverage(params.leverage, marketConfig.maxLeverage);
       
       // Calculate collateral required
       const collateral = size.div(params.leverage);
@@ -889,6 +883,64 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Gets market configuration from Socket API with caching (dynamic, accurate)
+   * Provides real-time min/max position sizes, leverage limits, and spread
+   * @param pairName - The pair name (e.g., "ETH/USD", "BTC/USD")
+   * @returns Market configuration with dynamic limits
+   */
+  public async getMarketConfig(pairName: string): Promise<any> {
+    // Check cache freshness
+    if (!this.marketConfigCache || Date.now() - this.marketCacheTimestamp > this.MARKET_CACHE_TTL_MS) {
+      // Refresh cache from Socket API
+      const markets = await this.socketAPI.getAllMarkets();
+      this.marketConfigCache = new Map();
+
+      markets.forEach(market => {
+        this.marketConfigCache!.set(market.name.toUpperCase(), {
+          pairIndex: market.pairIndex,
+          name: market.name,
+          minPositionSizeUSDC: market.minPositionSizeUSDC,
+          maxPositionSizeUSDC: market.maxPositionSizeUSDC,
+          minLeverage: market.minLeverage,
+          maxLeverage: market.maxLeverage,
+          spreadPercent: market.spreadPercent,
+          pythFeedId: market.pythFeedId
+        });
+      });
+
+      this.marketCacheTimestamp = Date.now();
+      console.log(`Refreshed market config cache: ${this.marketConfigCache.size} markets available`);
+    }
+
+    const config = this.marketConfigCache.get(pairName.toUpperCase());
+    if (!config) {
+      // Fallback to hardcoded TRADING_PAIRS for backward compatibility
+      const hardcodedConfig = TRADING_PAIRS[pairName as keyof typeof TRADING_PAIRS];
+      if (hardcodedConfig) {
+        console.warn(`Using hardcoded config for ${pairName} - Socket API data not available`);
+        return {
+          pairIndex: getPairIndex(pairName),
+          name: pairName,
+          minPositionSizeUSDC: new Decimal(hardcodedConfig.minSize),
+          maxPositionSizeUSDC: new Decimal(hardcodedConfig.maxSize),
+          minLeverage: 1,
+          maxLeverage: hardcodedConfig.maxLeverage,
+          spreadPercent: 0,
+          pythFeedId: ''
+        };
+      }
+
+      throw new TradingError(
+        ErrorCode.INVALID_PAIR,
+        `Trading pair not found: ${pairName}`,
+        pairName
+      );
+    }
+
+    return config;
+  }
+
+  /**
    * Gets the pair name for a given index from Socket API (dynamic, accurate)
    * @param index - The pair index
    * @returns The pair name or throws error if not found
@@ -986,24 +1038,17 @@ export class TraderClient extends EventEmitter {
         );
       }
       
-      // Get pair configuration from Socket API
-      const pairIndex = await this.getPairIndexFromAPI(params.pair);
-      const pairConfig = TRADING_PAIRS[params.pair as keyof typeof TRADING_PAIRS];
-      if (!pairConfig) {
-        throw new TradingError(
-          ErrorCode.INVALID_PAIR,
-          `Trading pair not supported: ${params.pair}`,
-          params.pair
-        );
-      }
-      
-      // Validate position size and leverage
+      // Get market configuration from Socket API (dynamic, always up-to-date)
+      const marketConfig = await this.getMarketConfig(params.pair);
+      const pairIndex = marketConfig.pairIndex;
+
+      // Validate position size and leverage using dynamic limits from Socket API
       const size = validatePositionSize(
         params.size,
-        new Decimal(pairConfig.minSize),
-        new Decimal(pairConfig.maxSize)
+        marketConfig.minPositionSizeUSDC,
+        marketConfig.maxPositionSizeUSDC.gt(0) ? marketConfig.maxPositionSizeUSDC : new Decimal(1000000)
       );
-      validateLeverage(params.leverage, pairConfig.maxLeverage);
+      validateLeverage(params.leverage, marketConfig.maxLeverage);
       
       // Calculate collateral
       const collateral = size.div(params.leverage);
