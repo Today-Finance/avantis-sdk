@@ -267,19 +267,23 @@ export class AdvancedTradingBot {
 
   /**
    * Check market conditions for trading opportunities
+   *
+   * NOTE: This example uses getMarketStats() which is now deprecated.
+   * In production, use Pyth Network for prices and Socket API for open interest.
    */
   private async checkMarketConditions() {
     try {
-      // Get market data for all pairs
-      const pairs = ['BTC/USD', 'ETH/USD', 'SOL/USD'];
-      const marketData = await Promise.all(
-        pairs.map(pair => this.feed.getMarketStats(pair))
-      );
+      // DEPRECATED: feed.getMarketStats() no longer works
+      // Use Pyth Network and Socket API instead:
+      //
+      // const market = await this.sdk.getMarketByIndex(1); // BTC/USD
+      // const priceData = await this.sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
+      // const totalOI = await this.sdk.getTotalOpenInterest();
 
-      // Analyze each market
-      for (const data of marketData) {
-        await this.analyzeMarket(data);
-      }
+      console.warn('Market stats not available - using placeholder data');
+
+      // For demonstration purposes only
+      // In production, implement using Pyth + Socket API as shown above
     } catch (error) {
       console.error('Error checking market conditions:', error);
     }

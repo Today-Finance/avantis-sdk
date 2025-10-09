@@ -157,15 +157,21 @@ await trader.closePosition({
 ```typescript
 const feed = new FeedClient();
 
-// Subscribe to price updates
-feed.subscribeToPrice('ETH/USD', (data) => {
-  console.log(`ETH Price: ${data.price}`);
-});
+// Get current price using Pyth Network
+const market = await sdk.getMarketByIndex(0); // ETH/USD
+const priceData = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
 
-// Get market stats
-const stats = await feed.getMarketStats('ETH/USD');
-console.log(`24h Volume: ${stats.volume24h}`);
-console.log(`24h Change: ${stats.changePercent24h}%`);
+const price = priceData.expo < 0
+  ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
+  : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
+
+console.log(`${market.name}: $${price}`);
+
+// Get open interest data
+const totalOI = await sdk.getTotalOpenInterest();
+console.log(`Total OI - Long: $${totalOI.long}, Short: $${totalOI.short}`);
+
+// Note: volume24h and 24h price changes are not available via Avantis API
 ```
 
 ### Update TP/SL on Existing Positions

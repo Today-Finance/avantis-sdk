@@ -165,45 +165,22 @@ export class FeedClient extends EventEmitter {
 
   /**
    * Gets the latest price for a trading pair
+   * @deprecated This method attempts to fetch from a non-existent Avantis price API.
+   * Use Pyth Network integration instead: sdk.pyth.getLatestPriceByFeedId()
    */
   public async getLatestPrice(pair: string): Promise<PriceFeedData> {
     validateTradingPair(pair);
-    
-    // Check cache first
-    const cached = this.priceCache.get(pair);
-    if (cached && (Date.now() - cached.timestamp.getTime()) < 1000) {
-      return cached;
-    }
-    
-    try {
-      // Fetch from API
-      const response = await this.http.get(`/prices/${pair}`);
-      const data = response.data;
-      
-      const priceFeed: PriceFeedData = {
-        pair,
-        price: new Decimal(data.price),
-        bid: new Decimal(data.bid || data.price),
-        ask: new Decimal(data.ask || data.price),
-        timestamp: new Date(data.timestamp),
-        confidence: data.confidence || 1,
-        expo: data.expo || -8
-      };
-      
-      // Update cache
-      this.priceCache.set(pair, priceFeed);
-      
-      // Notify subscribers
-      this.notifyPriceSubscribers(pair, priceFeed);
-      
-      return priceFeed;
-    } catch (error) {
-      // If API fails, return cached price if available
-      if (cached) {
-        return cached;
-      }
-      throw handleError(error);
-    }
+
+    throw new Error(
+      `Price data is not available via Avantis API. ` +
+      `The endpoint 'https://api.avantis.finance/prices/${pair}' does not exist. ` +
+      `\n\nRecommended alternative:\n` +
+      `- Use Pyth Network: sdk.pyth.getLatestPriceByFeedId(pythFeedId)\n` +
+      `- Get pythFeedId from Socket API market data\n` +
+      `\nExample:\n` +
+      `  const market = await sdk.getMarketByIndex(0); // ETH/USD\n` +
+      `  const price = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);`
+    );
   }
 
   /**
@@ -228,33 +205,26 @@ export class FeedClient extends EventEmitter {
 
   /**
    * Gets market statistics for a trading pair
+   * @deprecated This method is not functional as Avantis does not provide a public stats API.
+   * Use Socket API for open interest data or Pyth Network for current prices instead.
    */
   public async getMarketStats(pair: string): Promise<MarketStats> {
     validateTradingPair(pair);
-    
-    try {
-      const response = await this.http.get(`/stats/${pair}`);
-      const data = response.data;
-      
-      return {
-        pair,
-        price: new Decimal(data.price),
-        volume24h: new Decimal(data.volume24h || 0),
-        high24h: new Decimal(data.high24h || data.price),
-        low24h: new Decimal(data.low24h || data.price),
-        change24h: new Decimal(data.change24h || 0),
-        changePercent24h: data.changePercent24h || 0,
-        openInterest: new Decimal(data.openInterest || 0),
-        fundingRate: new Decimal(data.fundingRate || 0),
-        nextFundingTime: new Date(data.nextFundingTime || Date.now() + 3600000)
-      };
-    } catch (error) {
-      throw handleError(error);
-    }
+
+    throw new Error(
+      `Market statistics (volume24h, price changes) are not available via Avantis API. ` +
+      `The endpoint 'https://api.avantis.finance/stats/${pair}' does not exist. ` +
+      `\n\nAlternatives:\n` +
+      `- Use Socket API (sdk.getTotalOpenInterest()) for open interest data\n` +
+      `- Use Pyth Network (sdk.pyth.getLatestPriceByFeedId()) for current prices\n` +
+      `- Query on-chain events for historical trading volume`
+    );
   }
 
   /**
    * Gets historical candle data
+   * @deprecated This method is not functional as Avantis does not provide a public candles API.
+   * Consider using on-chain event queries or third-party indexers for historical data.
    */
   public async getCandles(
     pair: string,
@@ -262,23 +232,15 @@ export class FeedClient extends EventEmitter {
     limit: number = 100
   ): Promise<Candle[]> {
     validateTradingPair(pair);
-    
-    try {
-      const response = await this.http.get(`/candles/${pair}`, {
-        params: { interval, limit }
-      });
-      
-      return response.data.map((c: any) => ({
-        time: new Date(c.time),
-        open: new Decimal(c.open),
-        high: new Decimal(c.high),
-        low: new Decimal(c.low),
-        close: new Decimal(c.close),
-        volume: new Decimal(c.volume)
-      }));
-    } catch (error) {
-      throw handleError(error);
-    }
+
+    throw new Error(
+      `Historical candle data is not available via Avantis API. ` +
+      `The endpoint 'https://api.avantis.finance/candles/${pair}' does not exist. ` +
+      `\n\nAlternatives:\n` +
+      `- Query on-chain events to build historical price data\n` +
+      `- Use third-party indexers like The Graph\n` +
+      `- Use Pyth Network for current price snapshots`
+    );
   }
 
   /**

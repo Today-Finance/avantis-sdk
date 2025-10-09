@@ -94,23 +94,24 @@ const result = await sdk.trader.openPositionWithFees({
 
 ### Real-time Price Feeds
 
+> **Note**: Avantis does not provide a public REST API for price feeds, volume, or market statistics. Use Pyth Network for price data and Socket API for open interest.
+
 ```typescript
-// Initialize feed client
-await sdk.feed.connect();
+// Get current prices using Pyth Network (recommended)
+const market = await sdk.getMarketByIndex(0); // ETH/USD
+const priceData = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
 
-// Subscribe to price updates
-const unsubscribe = sdk.feed.subscribeToPrice('BTC/USD', (priceData) => {
-  console.log(`BTC Price: $${priceData.price.toFixed(2)}`);
-  console.log(`24h Change: ${priceData.change24h}%`);
-});
+// Convert Pyth price format to readable price
+const price = priceData.expo < 0
+  ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
+  : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
 
-// Get latest price once
-const price = await sdk.feed.getLatestPrice('ETH/USD');
-console.log(`ETH: $${price.price}`);
+console.log(`${market.name}: $${price}`);
 
-// Cleanup
-unsubscribe();
-await sdk.feed.disconnect();
+// Get multiple prices at once
+const markets = await sdk.getAllMarketsFromAPI();
+const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 ```
 
 ### Socket API - Market Discovery
@@ -585,6 +586,46 @@ await sdk.setSigner({
 - **`MarketStats`**: 24-hour market statistics
 - **`AccountInfo`**: Complete account information
 - **`PythPriceUpdate`**: Pyth price feed data structure
+
+## ⚠️ API Limitations
+
+### Available Data Sources
+
+The SDK integrates with multiple data sources, each with specific capabilities:
+
+| Feature | Socket API | Pyth Network | On-Chain | FeedClient API |
+|---------|-----------|--------------|----------|----------------|
+| Market metadata | ✅ | ❌ | ✅ | ❌ |
+| Current prices | ❌ | ✅ | ❌ | ❌ |
+| Open interest | ✅ | ❌ | ✅ | ❌ |
+| Trading volume | ❌ | ❌ | ⚠️ Events only | ❌ |
+| 24h price change | ❌ | ❌ | ❌ | ❌ |
+| Historical candles | ❌ | ❌ | ❌ | ❌ |
+| Funding rates | ❌ | ❌ | ✅ | ❌ |
+
+### Not Available
+
+The following methods in `FeedClient` are **deprecated** and will throw errors:
+- ❌ `feed.getMarketStats()` - No volume24h or 24h price change data available
+- ❌ `feed.getLatestPrice()` - Use Pyth Network instead
+- ❌ `feed.getCandles()` - No historical candle data API
+
+### Recommended Alternatives
+
+```typescript
+// ❌ Don't use: feed.getMarketStats('BTC/USD')
+// ✅ Instead use:
+
+// For current prices - use Pyth Network
+const market = await sdk.getMarketByIndex(1); // BTC/USD
+const priceData = await sdk.pyth.getLatestPriceByFeedId(market.pythFeedId);
+
+// For open interest - use Socket API
+const totalOI = await sdk.getTotalOpenInterest();
+
+// For funding rates - query on-chain
+// (Contact Avantis for contract methods)
+```
 
 ## 🔧 Technical Details
 
