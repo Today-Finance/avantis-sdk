@@ -401,7 +401,7 @@ export class TraderClient extends EventEmitter {
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
         functionName: 'openTrade',
-        args: [tradeStruct, orderTypeValue, slippageUnits, priceUpdateData],
+        args: [tradeStruct, orderTypeValue, slippageUnits],
         value: executionFee,
         account
       });
