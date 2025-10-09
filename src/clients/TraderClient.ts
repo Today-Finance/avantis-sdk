@@ -362,23 +362,40 @@ export class TraderClient extends EventEmitter {
       const isLong = params.side === PositionSide.LONG;
       const collateralUnits = toUSDCUnits(collateral);
       const positionSizeUnits = toUSDCUnits(size);
-      const openPriceUnits = params.openPrice ? toUSDCUnits(params.openPrice) : 0;
       const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
       const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
       const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
-      
+
+      // Get current market price for market orders
+      let openPriceUnits: bigint;
+      if (params.openPrice) {
+        // For limit orders, use provided price with 10 decimals
+        const limitPrice = new Decimal(params.openPrice);
+        openPriceUnits = BigInt(limitPrice.mul(new Decimal(10).pow(10)).toFixed(0));
+      } else {
+        // For market orders, fetch current price from Pyth
+        const priceData = await this.pythClient.getLatestPrice(params.pair);
+        // Convert Pyth price directly to 10 decimals
+        // Pyth format: price * 10^expo, Contract expects: price * 10^10
+        // So we multiply by 10^(10 + expo)
+        const expo = priceData.expo;
+        const pythPrice = new Decimal(priceData.price.toString());
+        const exponentAdjustment = 10 + expo; // e.g., 10 + (-8) = 2
+        openPriceUnits = BigInt(pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0));
+      }
+
       const tradeStruct = {
         trader: address,
         pairIndex: pairIndex,
         index: 0, // This will be assigned by the contract
-        initialPosToken: collateralUnits,
+        initialPosToken: 0, // Always 0 for new positions (not collateral)
         positionSizeUSDC: positionSizeUnits,
         openPrice: openPriceUnits,
         buy: isLong,
         leverage: toLeverageUnits(params.leverage),
         tp: takeProfitUnits,
         sl: stopLossUnits,
-        timestamp: 0 // Current timestamp
+        timestamp: Math.floor(Date.now() / 1000) // Current Unix timestamp
       };
 
       // Execute transaction with proper execution fee
