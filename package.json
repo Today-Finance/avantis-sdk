@@ -1,6 +1,6 @@
 {
   "name": "@todayapp/avantis-sdk",
-  "version": "1.1.0-beta.6",
+  "version": "1.1.0-beta.7",
   "description": "Unofficial TypeScript SDK for Avantis DEX - Decentralized perpetual futures trading (BETA)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -61,9 +61,9 @@
   "dependencies": {
     "axios": "^1.12.2",
     "decimal.js": "^10.6.0",
-    "ethers": "^6.15.0",
     "eventemitter3": "^5.0.1",
     "isomorphic-ws": "^5.0.0",
+    "viem": "^2.21.60",
     "ws": "^8.18.3",
     "zod": "^4.1.11"
   },

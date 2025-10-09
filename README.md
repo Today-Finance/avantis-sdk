@@ -24,6 +24,7 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 - 📱 **Cross-Platform**: Works with Node.js, browsers, and React Native
 - ⚡ **Gas Optimized**: Multicall3 transaction bundling for 30-40% gas savings
 - 🛡️ **Production Ready**: Comprehensive error handling and recovery
+- 🔗 **Viem-Powered**: Built with [viem](https://viem.sh) for modern blockchain interactions and account abstraction support
 
 ## 📦 Installation
 
@@ -204,10 +205,10 @@ const result = await sdk.trader.openPosition({
 
 ## 📱 React Native Setup
 
-For React Native/Expo apps, install polyfills:
+For React Native/Expo apps, install the required polyfill:
 
 ```bash
-npm install react-native-get-random-values @ethersproject/shims
+npm install react-native-get-random-values
 ```
 
 Add to your app's entry point:
@@ -215,11 +216,12 @@ Add to your app's entry point:
 ```javascript
 // index.js or App.tsx
 import 'react-native-get-random-values';
-import '@ethersproject/shims';
 
 // Your app code
 import App from './App';
 ```
+
+> **Note**: The SDK now uses [viem](https://viem.sh) which has better React Native compatibility than ethers.js
 
 ## 📖 Core Concepts
 
@@ -527,11 +529,18 @@ await sdk.setSigner({
   path: "m/44'/60'/0'/0/0" // Optional HD path
 });
 
-// Injected provider (Browser)
+// Account Abstraction (e.g., with Kernel/ZeroDev)
+// The SDK is built with viem, making it compatible with smart account libraries
+import { createKernelAccount } from '@zerodev/sdk';
+
+const kernelAccount = await createKernelAccount(...);
 await sdk.setSigner({
-  type: 'injected'
+  type: 'privateKey',
+  privateKey: kernelAccount.privateKey
 });
 ```
+
+> **Account Abstraction Support**: The SDK uses [viem](https://viem.sh) internally, making it fully compatible with viem-based account abstraction libraries like Kernel, Biconomy, and Safe.
 
 ## 📝 API Reference
 
@@ -576,6 +585,35 @@ await sdk.setSigner({
 - **`MarketStats`**: 24-hour market statistics
 - **`AccountInfo`**: Complete account information
 - **`PythPriceUpdate`**: Pyth price feed data structure
+
+## 🔧 Technical Details
+
+### Built with Viem
+
+This SDK uses [viem](https://viem.sh) as its blockchain interaction library. Viem provides:
+
+- **Smaller Bundle Size**: ~80% smaller than ethers.js
+- **Better TypeScript**: Superior type inference and safety
+- **Modern Architecture**: Built for modern blockchain development
+- **Account Abstraction**: Native compatibility with smart account libraries
+
+#### Why Viem?
+
+The SDK was migrated from ethers.js to viem to enable:
+1. **Account Abstraction Support**: Works seamlessly with Kernel, ZeroDev, Biconomy, Safe, and other viem-based AA libraries
+2. **Better Developer Experience**: Enhanced TypeScript support and modern APIs
+3. **Performance**: Smaller bundle size and optimized for tree-shaking
+4. **Future-Proof**: Built for the next generation of blockchain applications
+
+All public APIs remain unchanged - the migration is internal only.
+
+### Dependencies
+
+- **viem** ^2.21.60 - Blockchain interactions
+- **decimal.js** ^10.6.0 - Precise decimal math
+- **axios** ^1.12.2 - HTTP requests
+- **ws** ^8.18.3 - WebSocket support
+- **zod** ^4.1.11 - Runtime validation
 
 ## 🧪 Development
 

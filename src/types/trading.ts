@@ -1,4 +1,3 @@
-import type { BigNumberish } from 'ethers';
 import Decimal from 'decimal.js';
 import type { PlatformFeeParams } from './platform-fees';
 
@@ -132,8 +131,8 @@ export interface TradeResponse {
   success: boolean;
   transactionHash: string;
   position?: Position;
-  gasUsed: BigNumberish;
-  effectiveGasPrice: BigNumberish;
+  gasUsed: bigint;
+  effectiveGasPrice: bigint;
   error?: string;
 }
 

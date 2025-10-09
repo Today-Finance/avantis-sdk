@@ -1,11 +1,7 @@
 import { TraderClient } from '../../src/clients/TraderClient';
-import { ethers } from 'ethers';
 import Decimal from 'decimal.js';
 import { PositionSide, ErrorCode } from '../../src/types';
 import { TradingError } from '../../src/utils/errors';
-
-// Mock ethers
-jest.mock('ethers');
 
 describe('TraderClient Integration Tests', () => {
   let client: TraderClient;

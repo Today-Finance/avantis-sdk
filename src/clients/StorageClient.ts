@@ -3,8 +3,7 @@
  * Provides read-only access to trading data and pair information
  */
 
-import { ethers } from 'ethers';
-import type { Contract } from 'ethers';
+import { getContract, getAddress as viemGetAddress, type PublicClient } from 'viem';
 import Decimal from 'decimal.js';
 import { BlockchainProvider } from '../providers/BlockchainProvider';
 import { NetworkConfig, Position, PendingLimitOrder, TradingPair } from '../types';
@@ -16,8 +15,8 @@ import type { PairStorageData, MarketData } from '../types/market';
 
 export class StorageClient {
   private blockchain: BlockchainProvider;
-  private tradingStorageContract?: Contract;
-  private pairStorageContract?: Contract;
+  private tradingStorageContract?: any;
+  private pairStorageContract?: any;
   private network: NetworkConfig;
 
   constructor(
@@ -33,24 +32,24 @@ export class StorageClient {
    * Initializes smart contract instances
    */
   private initializeContracts(): void {
-    const provider = this.blockchain.getProvider();
-    
+    const publicClient = this.blockchain.getProvider();
+
     // Initialize TradingStorage contract
     if (this.network.contracts.tradingStorage) {
-      this.tradingStorageContract = new ethers.Contract(
-        this.network.contracts.tradingStorage,
-        TradingStorageContractABI,
-        provider
-      );
+      this.tradingStorageContract = getContract({
+        address: this.network.contracts.tradingStorage as `0x${string}`,
+        abi: TradingStorageContractABI,
+        client: publicClient as any
+      });
     }
-    
+
     // Initialize PairStorage contract
     if (this.network.contracts.pairStorage) {
-      this.pairStorageContract = new ethers.Contract(
-        this.network.contracts.pairStorage,
-        PairStorageContractABI,
-        provider
-      );
+      this.pairStorageContract = getContract({
+        address: this.network.contracts.pairStorage as `0x${string}`,
+        abi: PairStorageContractABI,
+        client: publicClient as any
+      });
     }
   }
 
@@ -62,8 +61,8 @@ export class StorageClient {
       if (!this.tradingStorageContract) {
         return [];
       }
-      
-      const trades = await this.tradingStorageContract.getTrades(trader);
+
+      const trades = await this.tradingStorageContract.read.getTrades([trader as `0x${string}`]);
       return trades;
     } catch (error) {
       throw handleError(error);
@@ -78,9 +77,9 @@ export class StorageClient {
       if (!this.tradingStorageContract) {
         return [];
       }
-      
-      const orders = await this.tradingStorageContract.getPendingLimitOrders(trader);
-      
+
+      const orders = await this.tradingStorageContract.read.getPendingLimitOrders([trader as `0x${string}`]);
+
       return orders.map((order: any) => ({
         id: `${order.pairIndex}-${order.index}`,
         trader: order.trader,
@@ -108,8 +107,8 @@ export class StorageClient {
       if (!this.pairStorageContract) {
         return new Decimal(0);
       }
-      
-      const maxOI = await this.pairStorageContract.getMaxOpenInterest(pairIndex);
+
+      const maxOI = await this.pairStorageContract.read.getMaxOpenInterest([BigInt(pairIndex)]);
       return new Decimal(formatUSDC(maxOI));
     } catch (error) {
       throw handleError(error);
@@ -124,8 +123,8 @@ export class StorageClient {
       if (!this.pairStorageContract) {
         return new Decimal(0);
       }
-      
-      const oi = await this.pairStorageContract.getOpenInterest(pairIndex, isLong);
+
+      const oi = await this.pairStorageContract.read.getOpenInterest([BigInt(pairIndex), isLong]);
       return new Decimal(formatUSDC(oi));
     } catch (error) {
       throw handleError(error);
@@ -140,8 +139,8 @@ export class StorageClient {
       if (!this.pairStorageContract) {
         return new Decimal(0);
       }
-      
-      const fees = await this.pairStorageContract.getBorrowingFees(pairIndex, isLong);
+
+      const fees = await this.pairStorageContract.read.getBorrowingFees([BigInt(pairIndex), isLong]);
       return new Decimal(formatUSDC(fees));
     } catch (error) {
       throw handleError(error);
@@ -156,8 +155,8 @@ export class StorageClient {
       if (!this.pairStorageContract) {
         return 0;
       }
-      
-      const spread = await this.pairStorageContract.getPairSpread(pairIndex);
+
+      const spread = await this.pairStorageContract.read.getPairSpread([BigInt(pairIndex)]);
       return Number(spread) / 1e10; // Convert from basis points
     } catch (error) {
       throw handleError(error);
@@ -173,7 +172,7 @@ export class StorageClient {
         return false;
       }
 
-      return await this.pairStorageContract.isPairListed(pairIndex);
+      return await this.pairStorageContract.read.isPairListed([BigInt(pairIndex)]);
     } catch (error) {
       throw handleError(error);
     }
@@ -188,7 +187,7 @@ export class StorageClient {
         return 0;
       }
 
-      const count = await this.pairStorageContract.pairsCount();
+      const count = await this.pairStorageContract.read.pairsCount();
       return Number(count);
     } catch (error) {
       throw handleError(error);
@@ -205,7 +204,7 @@ export class StorageClient {
         throw new Error('PairStorage contract not available');
       }
 
-      const pairData = await this.pairStorageContract.pairs(pairIndex);
+      const pairData = await this.pairStorageContract.read.pairs([BigInt(pairIndex)]);
 
       return {
         pairIndex,

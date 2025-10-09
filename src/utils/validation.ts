@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import Decimal from 'decimal.js';
-import { ethers } from 'ethers';
+import { isAddress } from 'viem';
 import { ValidationError } from './errors';
 import { PositionSide } from '../types';
 
@@ -19,7 +19,7 @@ const DecimalSchema = z.union([
 
 // Ethereum address validation
 const AddressSchema = z.string().refine(
-  (val) => ethers.isAddress(val),
+  (val) => isAddress(val),
   { message: 'Invalid Ethereum address' }
 );
 
@@ -151,25 +151,25 @@ export function validatePositionSize(
   maxSize?: Decimal
 ): Decimal {
   const sizeDecimal = new Decimal(size);
-  
+
   if (sizeDecimal.lte(0)) {
     throw new ValidationError('Position size must be greater than 0', 'size');
   }
-  
+
   if (minSize && sizeDecimal.lt(minSize)) {
     throw new ValidationError(
       `Position size must be at least ${minSize.toString()}`,
       'size'
     );
   }
-  
+
   if (maxSize && sizeDecimal.gt(maxSize)) {
     throw new ValidationError(
       `Position size must not exceed ${maxSize.toString()}`,
       'size'
     );
   }
-  
+
   return sizeDecimal;
 }
 
@@ -178,14 +178,14 @@ export function validatePositionSize(
  */
 export function validateSlippage(slippage?: number): number | undefined {
   if (slippage === undefined) return undefined;
-  
+
   if (slippage < 0 || slippage > 100) {
     throw new ValidationError(
       'Slippage must be between 0 and 100 percent',
       'slippage'
     );
   }
-  
+
   return slippage;
 }
 
@@ -198,23 +198,23 @@ export function validateStopLoss(
   isLong: boolean
 ): Decimal | undefined {
   if (!stopLoss) return undefined;
-  
+
   const slDecimal = new Decimal(stopLoss);
-  
+
   if (isLong && slDecimal.gte(entryPrice)) {
     throw new ValidationError(
       'Stop loss must be below entry price for long positions',
       'stopLoss'
     );
   }
-  
+
   if (!isLong && slDecimal.lte(entryPrice)) {
     throw new ValidationError(
       'Stop loss must be above entry price for short positions',
       'stopLoss'
     );
   }
-  
+
   return slDecimal;
 }
 
@@ -227,23 +227,23 @@ export function validateTakeProfit(
   isLong: boolean
 ): Decimal | undefined {
   if (!takeProfit) return undefined;
-  
+
   const tpDecimal = new Decimal(takeProfit);
-  
+
   if (isLong && tpDecimal.lte(entryPrice)) {
     throw new ValidationError(
       'Take profit must be above entry price for long positions',
       'takeProfit'
     );
   }
-  
+
   if (!isLong && tpDecimal.gte(entryPrice)) {
     throw new ValidationError(
       'Take profit must be below entry price for short positions',
       'takeProfit'
     );
   }
-  
+
   return tpDecimal;
 }
 

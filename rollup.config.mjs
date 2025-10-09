@@ -5,7 +5,9 @@ import json from '@rollup/plugin-json';
 import dts from 'rollup-plugin-dts';
 
 const external = [
-  'ethers',
+  'viem',
+  'viem/accounts',
+  'viem/chains',
   'decimal.js',
   'axios',
   'ws',

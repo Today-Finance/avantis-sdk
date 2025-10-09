@@ -1,5 +1,4 @@
-import { ethers } from 'ethers';
-import type { Contract } from 'ethers';
+import { getContract, parseUnits, decodeEventLog, encodeFunctionData, parseEther } from 'viem';
 import Decimal from 'decimal.js';
 import { EventEmitter } from 'eventemitter3';
 import { BlockchainProvider } from '../providers/BlockchainProvider';
@@ -60,8 +59,8 @@ import { SocketAPIClient } from './SocketAPIClient';
 
 export class TraderClient extends EventEmitter {
   private blockchain: BlockchainProvider;
-  private tradingContract?: ethers.Contract;
-  private usdcContract!: ethers.Contract;
+  private tradingContract?: any;
+  private usdcContract!: any;
   private network: NetworkConfig;
   private positions: Map<string, Position> = new Map();
   private feeManager?: FeeManager;
@@ -78,12 +77,12 @@ export class TraderClient extends EventEmitter {
     this.network = this.blockchain.getNetwork();
 
     // Initialize USDC contract (always needed)
-    const provider = this.blockchain.getProvider();
-    this.usdcContract = new ethers.Contract(
-      this.network.contracts.usdc,
-      USDCContractABI,
-      provider
-    );
+    const publicClient = this.blockchain.getProvider();
+    this.usdcContract = getContract({
+      address: this.network.contracts.usdc as `0x${string}`,
+      abi: USDCContractABI,
+      client: publicClient as any
+    });
 
     // Initialize Pyth client for price oracle data
     this.pythClient = new PythClient({
@@ -100,15 +99,15 @@ export class TraderClient extends EventEmitter {
    * Initializes smart contract instances
    */
   private initializeContracts(): void {
-    const provider = this.blockchain.getProvider();
-    
+    const publicClient = this.blockchain.getProvider();
+
     // Initialize trading contract if available
     if (this.network.contracts.trading !== '0x0000000000000000000000000000000000000000') {
-      this.tradingContract = new ethers.Contract(
-        this.network.contracts.trading,
-        TradingContractABI,
-        provider
-      );
+      this.tradingContract = getContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        client: publicClient as any
+      });
     }
   }
 
@@ -117,25 +116,18 @@ export class TraderClient extends EventEmitter {
    */
   public async setSigner(config: SignerConfig): Promise<void> {
     this.blockchain.setSigner(config);
-    
-    // Reinitialize contracts with signer
-    const signer = this.blockchain.getSigner();
-    
-    if (this.tradingContract) {
-      this.tradingContract = this.tradingContract.connect(signer) as ethers.Contract;
-    }
-    
-    this.usdcContract = this.usdcContract.connect(signer) as ethers.Contract;
-    
-    this.emit('signerSet', await signer.getAddress());
+
+    const account = this.blockchain.getAccount();
+
+    this.emit('signerSet', account.address);
   }
 
   /**
    * Gets the current account address
    */
   public async getAddress(): Promise<string> {
-    const signer = this.blockchain.getSigner();
-    return await signer.getAddress();
+    const account = this.blockchain.getAccount();
+    return account.address;
   }
 
   /**
@@ -208,8 +200,8 @@ export class TraderClient extends EventEmitter {
     try {
       const addr = address || await this.getAddress();
       validateAddress(addr);
-      
-      const balance = await this.usdcContract.balanceOf(addr);
+
+      const balance = await this.usdcContract.read.balanceOf([addr as `0x${string}`]);
       return new Decimal(formatUSDC(balance));
     } catch (error) {
       throw handleError(error);
@@ -223,16 +215,16 @@ export class TraderClient extends EventEmitter {
     try {
       const addr = address || await this.getAddress();
       validateAddress(addr);
-      
+
       if (!this.tradingContract) {
         return new Decimal(0);
       }
-      
-      const allowance = await this.usdcContract.allowance(
-        addr,
-        this.network.contracts.trading
-      );
-      
+
+      const allowance = await this.usdcContract.read.allowance([
+        addr as `0x${string}`,
+        this.network.contracts.trading as `0x${string}`
+      ]);
+
       return new Decimal(formatUSDC(allowance));
     } catch (error) {
       throw handleError(error);
@@ -248,24 +240,29 @@ export class TraderClient extends EventEmitter {
     try {
       const amountDecimal = new Decimal(amount);
       const amountUnits = toUSDCUnits(amountDecimal);
-      
-      const tx = await this.usdcContract.approve(
-        this.network.contracts.trading,
-        amountUnits
-      );
-      
-      const receipt = await tx.wait();
-      
+
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.usdc as `0x${string}`,
+        abi: USDCContractABI,
+        functionName: 'approve',
+        args: [this.network.contracts.trading as `0x${string}`, amountUnits],
+        account
+      });
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       this.emit('usdcApproved', {
         amount: amountDecimal,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -373,7 +370,7 @@ export class TraderClient extends EventEmitter {
       const openPriceUnits = params.openPrice ? toUSDCUnits(params.openPrice) : 0;
       const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
       const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
-      const slippageUnits = ethers.parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
+      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
       
       const tradeStruct = {
         trader: address,
@@ -403,17 +400,20 @@ export class TraderClient extends EventEmitter {
       }
 
       // Execute transaction with proper execution fee
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
-      const tx = await this.tradingContract.openTrade(
-        tradeStruct,
-        orderTypeValue,
-        slippageUnits,
-        priceUpdateData,
-        { value: executionFee }
-      );
-      
-      const receipt = await tx.wait();
-      
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'openTrade',
+        args: [tradeStruct, orderTypeValue, slippageUnits, priceUpdateData],
+        value: executionFee,
+        account
+      });
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       // Parse events based on order type
       let eventName: string;
       if (orderType === OrderType.MARKET) {
@@ -421,38 +421,29 @@ export class TraderClient extends EventEmitter {
       } else {
         eventName = 'LimitOrderInitiated';
       }
-      
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsedLog = this.tradingContract?.interface.parseLog(log);
-          return parsedLog?.name === eventName;
-        } catch {
-          return false;
-        }
-      });
-      
+
+      // Note: Event parsing simplified - events will be emitted from contract
+      const event = receipt.logs[0]; // First log typically contains the event
+
       let position: Position | undefined;
       if (event && orderType === OrderType.MARKET) {
         // For market orders, try to get the position immediately
-        const parsedEvent = this.tradingContract?.interface.parseLog(event);
-        if (parsedEvent?.args) {
-          // The position might not be available immediately for market orders
-          // as they go through oracle execution
-        }
+        // The position might not be available immediately for market orders
+        // as they go through oracle execution
       }
-      
+
       this.emit(orderType === OrderType.MARKET ? 'positionOpened' : 'limitOrderPlaced', {
         position,
-        transactionHash: receipt.hash,
+        transactionHash: receipt.transactionHash,
         orderType
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         position,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -506,27 +497,30 @@ export class TraderClient extends EventEmitter {
       }
 
       // Execute closeTradeMarket with execution fee
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
-      const tx = await this.tradingContract.closeTradeMarket(
-        pairIndex,
-        positionIndex,
-        closeAmount,
-        priceUpdateData,
-        { value: executionFee }
-      );
-      
-      const receipt = await tx.wait();
-      
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'closeTradeMarket',
+        args: [pairIndex, positionIndex, closeAmount, priceUpdateData],
+        value: executionFee,
+        account
+      });
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       this.emit('positionClosed', {
         positionId: params.positionId,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -560,8 +554,8 @@ export class TraderClient extends EventEmitter {
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
 
-      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0n;
-      const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0n;
+      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : BigInt(0);
+      const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : BigInt(0);
 
       // Get pair name from Socket API for Pyth price data
       const pairName = await this.getPairNameFromAPI(pairIndex);
@@ -580,28 +574,36 @@ export class TraderClient extends EventEmitter {
 
       // Execute updateTpAndSl transaction
       // Note: Contract expects (pairIndex, index, _newSl, _newTP, priceUpdateData)
-      const tx = await this.tradingContract.updateTpAndSl(
-        pairIndex,
-        positionIndex,
-        stopLossUnits,    // Stop loss FIRST
-        takeProfitUnits,  // Take profit SECOND
-        priceUpdateData   // Pyth price update data
-      );
-      
-      const receipt = await tx.wait();
-      
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'updateTpAndSl',
+        args: [
+          pairIndex,
+          positionIndex,
+          stopLossUnits,    // Stop loss FIRST
+          takeProfitUnits,  // Take profit SECOND
+          priceUpdateData   // Pyth price update data
+        ],
+        account
+      });
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       this.emit('positionUpdated', {
         positionId: params.positionId,
         stopLoss: params.stopLoss,
         takeProfit: params.takeProfit,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -616,21 +618,21 @@ export class TraderClient extends EventEmitter {
       const addr = trader || await this.getAddress();
 
       // Get position data from TradingStorage via storage contract interface
-      const provider = this.blockchain.getProvider();
+      const publicClient = this.blockchain.getProvider();
       const tradingStorageAddress = this.network.contracts.tradingStorage;
 
       if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
         return null;
       }
 
-      const tradingStorageContract = new ethers.Contract(
-        tradingStorageAddress,
-        TradingStorageContractABI,
-        provider
-      );
+      const tradingStorageContract: any = getContract({
+        address: tradingStorageAddress as `0x${string}`,
+        abi: TradingStorageContractABI,
+        client: publicClient as any
+      });
 
       // Call openTrades(trader, pairIndex, index)
-      const trade = await tradingStorageContract.openTrades(addr, pairIndex, positionIndex);
+      const trade = await tradingStorageContract.read.openTrades([addr as `0x${string}`, pairIndex, positionIndex]);
 
       // Check if trade exists (trader address should not be zero)
       if (!trade || trade.trader === '0x0000000000000000000000000000000000000000') {
@@ -696,12 +698,12 @@ export class TraderClient extends EventEmitter {
     try {
       // Try to get current price from price aggregator contract if available
       if (this.network.contracts.priceAggregator && this.network.contracts.priceAggregator !== '0x0000000000000000000000000000000000000000') {
-        const priceAggregatorContract = new ethers.Contract(
-          this.network.contracts.priceAggregator,
-          (await import('../contracts')).PriceAggregatorContractABI,
-          this.blockchain.getProvider()
-        );
-        const priceData = await priceAggregatorContract.getPrice(pairIndex);
+        const priceAggregatorContract: any = getContract({
+          address: this.network.contracts.priceAggregator as `0x${string}`,
+          abi: (await import('../contracts')).PriceAggregatorContractABI,
+          client: this.blockchain.getProvider() as any
+        });
+        const priceData = await priceAggregatorContract.read.getPrice([pairIndex]);
         markPrice = new Decimal(formatUSDC(priceData.price || priceData[0]));
       }
     } catch {
@@ -750,34 +752,32 @@ export class TraderClient extends EventEmitter {
       }
       
       // Execute cancelOpenLimitOrder
-      const tx = await this.tradingContract.cancelOpenLimitOrder(
-        params.pairIndex,
-        params.orderIndex
-      );
-      
-      const receipt = await tx.wait();
-      
-      // Parse the cancellation event
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsedLog = this.tradingContract?.interface.parseLog(log);
-          return parsedLog?.name === 'OpenLimitCanceled';
-        } catch {
-          return false;
-        }
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'cancelOpenLimitOrder',
+        args: [params.pairIndex, params.orderIndex],
+        account
       });
-      
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
+      // Note: Event parsing simplified - events will be emitted from contract
+      const event = receipt.logs[0]; // First log typically contains the event
+
       this.emit('limitOrderCanceled', {
         pairIndex: params.pairIndex,
         orderIndex: params.orderIndex,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -797,43 +797,37 @@ export class TraderClient extends EventEmitter {
       }
       
       const priceUnits = toUSDCUnits(params.price);
-      const slippageUnits = ethers.parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
+      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
       const tpUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
       const slUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
-      
+
       // Execute updateOpenLimitOrder
-      const tx = await this.tradingContract.updateOpenLimitOrder(
-        params.pairIndex,
-        params.orderIndex,
-        priceUnits,
-        slippageUnits,
-        tpUnits,
-        slUnits
-      );
-      
-      const receipt = await tx.wait();
-      
-      // Parse the update event
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsedLog = this.tradingContract?.interface.parseLog(log);
-          return parsedLog?.name === 'OpenLimitUpdated';
-        } catch {
-          return false;
-        }
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'updateOpenLimitOrder',
+        args: [params.pairIndex, params.orderIndex, priceUnits, slippageUnits, tpUnits, slUnits],
+        account
       });
-      
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
+      // Note: Event parsing simplified - events will be emitted from contract
+      const event = receipt.logs[0]; // First log typically contains the event
+
       this.emit('limitOrderUpdated', {
         pairIndex: params.pairIndex,
         orderIndex: params.orderIndex,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
-      
+
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -1055,8 +1049,8 @@ export class TraderClient extends EventEmitter {
         timestamp: 0
       };
       
-      const slippageUnits = ethers.parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
 
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
@@ -1073,28 +1067,30 @@ export class TraderClient extends EventEmitter {
         slippageUnits,
         executionFee
       });
-      
+
       // Execute bundled transaction
-      const signer = this.blockchain.getSigner();
-      const tx = await signer.sendTransaction({
-        to: bundled.to,
-        data: bundled.data,
-        value: bundled.value
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).sendTransaction({
+        to: bundled.to as `0x${string}`,
+        data: bundled.data as `0x${string}`,
+        value: bundled.value,
+        account
       });
-      
-      const receipt = await tx.wait();
-      
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       this.emit('positionOpenedWithFees', {
-        transactionHash: receipt!.hash,
+        transactionHash: receipt.transactionHash,
         feeBreakdown,
         bundledOperations: bundled.description
       });
-      
+
       return {
-        success: receipt!.status === 1,
-        transactionHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
-        effectiveGasPrice: receipt!.gasPrice || receipt!.gasPrice
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -1140,7 +1136,7 @@ export class TraderClient extends EventEmitter {
       
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
-      const closeAmount = params.size ? toUSDCUnits(params.size) : 0n;
+      const closeAmount = params.size ? toUSDCUnits(params.size) : BigInt(0);
       
       // Calculate platform fees on the closing size
       // Note: This is simplified - in reality you might want to calculate based on PnL or returned collateral
@@ -1149,7 +1145,7 @@ export class TraderClient extends EventEmitter {
       
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
 
       const bundled = this.multicallBundler.bundleCloseWithFees({
         usdcAddress: this.network.contracts.usdc,
@@ -1163,29 +1159,31 @@ export class TraderClient extends EventEmitter {
         closeAmount,
         executionFee
       });
-      
+
       // Execute bundled transaction
-      const signer = this.blockchain.getSigner();
-      const tx = await signer.sendTransaction({
-        to: bundled.to,
-        data: bundled.data,
-        value: bundled.value
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).sendTransaction({
+        to: bundled.to as `0x${string}`,
+        data: bundled.data as `0x${string}`,
+        value: bundled.value,
+        account
       });
-      
-      const receipt = await tx.wait();
-      
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
       this.emit('positionClosedWithFees', {
         positionId: params.positionId,
-        transactionHash: receipt!.hash,
+        transactionHash: receipt.transactionHash,
         feeBreakdown,
         bundledOperations: bundled.description
       });
-      
+
       return {
-        success: receipt!.status === 1,
-        transactionHash: receipt!.hash,
-        gasUsed: receipt!.gasUsed,
-        effectiveGasPrice: receipt!.gasPrice || receipt!.gasPrice
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -1223,31 +1221,39 @@ export class TraderClient extends EventEmitter {
 
       // Execute updateMargin transaction
       // Note: This requires an execution fee
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
-      const tx = await this.tradingContract.updateMargin(
-        params.pairIndex,
-        params.positionIndex,
-        params.type, // 0 = ADD, 1 = REMOVE
-        amountUnits,
-        priceUpdateData,
-        { value: executionFee }
-      );
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'updateMargin',
+        args: [
+          params.pairIndex,
+          params.positionIndex,
+          params.type, // 0 = ADD, 1 = REMOVE
+          amountUnits,
+          priceUpdateData
+        ],
+        value: executionFee,
+        account
+      });
 
-      const receipt = await tx.wait();
+      const receipt = await this.blockchain.waitForTransaction(hash);
 
       this.emit('marginUpdated', {
         pairIndex: params.pairIndex,
         positionIndex: params.positionIndex,
         type: params.type,
         amount: params.amount,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
 
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -1269,33 +1275,41 @@ export class TraderClient extends EventEmitter {
       const priceUpdateData = params.priceUpdateData || [];
 
       // Calculate execution fee (may need to cover Pyth fee)
-      const executionFee = ethers.parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
 
       // Execute the limit order
-      const tx = await this.tradingContract.executeLimitOrder(
-        params.orderType, // LimitOrderType enum
-        params.trader,
-        params.pairIndex,
-        params.index,
-        priceUpdateData,
-        { value: executionFee }
-      );
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: 'executeLimitOrder',
+        args: [
+          params.orderType, // LimitOrderType enum
+          params.trader as `0x${string}`,
+          params.pairIndex,
+          params.index,
+          priceUpdateData
+        ],
+        value: executionFee,
+        account
+      });
 
-      const receipt = await tx.wait();
+      const receipt = await this.blockchain.waitForTransaction(hash);
 
       this.emit('limitOrderExecuted', {
         orderType: params.orderType,
         trader: params.trader,
         pairIndex: params.pairIndex,
         index: params.index,
-        transactionHash: receipt.hash
+        transactionHash: receipt.transactionHash
       });
 
       return {
-        success: receipt.status === 1,
-        transactionHash: receipt.hash,
+        success: receipt.status === 'success',
+        transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice || receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice
       };
     } catch (error) {
       throw handleError(error);
@@ -1310,18 +1324,18 @@ export class TraderClient extends EventEmitter {
       const addr = address || await this.getAddress();
 
       // Use StorageClient to fetch pending orders
-      const provider = this.blockchain.getProvider();
+      const publicClient = this.blockchain.getProvider();
       const tradingStorageAddress = this.network.contracts.tradingStorage;
 
       if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
         return [];
       }
 
-      const tradingStorageContract = new ethers.Contract(
-        tradingStorageAddress,
-        TradingStorageContractABI,
-        provider
-      );
+      const tradingStorageContract: any = getContract({
+        address: tradingStorageAddress as `0x${string}`,
+        abi: TradingStorageContractABI,
+        client: publicClient as any
+      });
 
       // Get pending orders from storage
       // Note: This is a simplified implementation
@@ -1336,7 +1350,7 @@ export class TraderClient extends EventEmitter {
         // Check up to 3 potential order indices per pair
         for (let i = 0; i < 3; i++) {
           try {
-            const order = await tradingStorageContract.openLimitOrders(addr, pairIndex, i);
+            const order = await tradingStorageContract.read.openLimitOrders([addr as `0x${string}`, pairIndex, i]);
 
             // Check if order exists
             if (order && order.trader !== '0x0000000000000000000000000000000000000000') {
