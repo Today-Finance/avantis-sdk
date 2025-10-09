@@ -54,8 +54,6 @@ export interface OpenPositionParams {
   slippage?: number;
   referrer?: string;
   platformFee?: PlatformFeeParams;  // Platform fee configuration
-  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
-  priceUpdateData?: string[];  // Manually provided Pyth price update data
 }
 
 export interface ClosePositionParams {
@@ -63,8 +61,6 @@ export interface ClosePositionParams {
   size?: Decimal | number | string;
   slippage?: number;
   platformFee?: PlatformFeeParams;  // Platform fee configuration
-  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
-  priceUpdateData?: string[];  // Manually provided Pyth price update data
 }
 
 export interface UpdatePositionParams {

@@ -381,19 +381,6 @@ export class TraderClient extends EventEmitter {
         timestamp: 0 // Current timestamp
       };
 
-      // Get Pyth price update data
-      const autofetch = params.autofetchPrices !== false; // Default to true
-      let priceUpdateData: string[] = params.priceUpdateData || [];
-
-      if (autofetch && priceUpdateData.length === 0) {
-        try {
-          priceUpdateData = await this.pythClient.getPriceUpdateData(params.pair);
-        } catch (error) {
-          // Log warning but continue - some contracts may not require price data
-          console.warn(`Failed to fetch Pyth price data for ${params.pair}:`, error);
-        }
-      }
-
       // Execute transaction with proper execution fee
       const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
       const walletClient = this.blockchain.getSigner();
@@ -476,21 +463,6 @@ export class TraderClient extends EventEmitter {
       // Determine close amount (0 means close full position)
       const closeAmount = params.size ? toUSDCUnits(params.size) : 0;
 
-      // Get pair name from Socket API for Pyth price data
-      const pairName = await this.getPairNameFromAPI(pairIndex);
-
-      // Get Pyth price update data
-      const autofetch = params.autofetchPrices !== false; // Default to true
-      let priceUpdateData: string[] = params.priceUpdateData || [];
-
-      if (autofetch && priceUpdateData.length === 0) {
-        try {
-          priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
-        } catch (error) {
-          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
-        }
-      }
-
       // Execute closeTradeMarket with execution fee
       const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
       const walletClient = this.blockchain.getSigner();
@@ -499,7 +471,7 @@ export class TraderClient extends EventEmitter {
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
         functionName: 'closeTradeMarket',
-        args: [pairIndex, positionIndex, closeAmount, priceUpdateData],
+        args: [pairIndex, positionIndex, closeAmount],
         value: executionFee,
         account
       });
