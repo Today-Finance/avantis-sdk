@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js';
-import { ethers } from 'ethers';
+import { formatUnits, parseUnits, formatEther, parseEther, isAddress, getAddress } from 'viem';
 
 /**
  * Formats a Decimal value to a string with specified decimal places
@@ -13,12 +13,12 @@ export function formatDecimal(value: Decimal, decimals: number = 2): string {
  */
 export function formatPrice(price: Decimal | number | string, decimals: number = 2): string {
   const priceDecimal = new Decimal(price);
-  
+
   // For very small values, use more decimal places
   if (priceDecimal.lt(0.01) && priceDecimal.gt(0)) {
     return priceDecimal.toFixed(6);
   }
-  
+
   return priceDecimal.toFixed(decimals);
 }
 
@@ -42,7 +42,7 @@ export function formatLeverage(leverage: number): string {
  */
 export function formatUSDC(amount: Decimal | bigint | string): string {
   if (typeof amount === 'bigint') {
-    return ethers.formatUnits(amount, 6);
+    return formatUnits(amount, 6);
   }
   const amountDecimal = new Decimal(amount.toString());
   return amountDecimal.div(1e6).toFixed(2);
@@ -64,7 +64,7 @@ export function formatETH(amount: bigint | string): string {
   if (typeof amount === 'string') {
     amount = BigInt(amount);
   }
-  return ethers.formatEther(amount);
+  return formatEther(amount);
 }
 
 /**
@@ -72,14 +72,14 @@ export function formatETH(amount: bigint | string): string {
  */
 export function toWei(amount: Decimal | number | string): bigint {
   const amountString = new Decimal(amount).toFixed();
-  return ethers.parseEther(amountString);
+  return parseEther(amountString);
 }
 
 /**
  * Truncates an Ethereum address for display
  */
 export function truncateAddress(address: string, start: number = 6, end: number = 4): string {
-  if (!ethers.isAddress(address)) {
+  if (!isAddress(address)) {
     return address;
   }
   return `${address.slice(0, start)}...${address.slice(-end)}`;
@@ -117,7 +117,7 @@ export function formatPnL(pnl: Decimal | number): { value: string; isProfit: boo
   const pnlDecimal = new Decimal(pnl);
   const isProfit = pnlDecimal.gte(0);
   const prefix = isProfit ? '+' : '';
-  
+
   return {
     value: `${prefix}${pnlDecimal.toFixed(2)}`,
     isProfit
@@ -147,7 +147,7 @@ export function parseTradingPair(pair: string): { base: string; quote: string } 
  */
 export function formatCompactNumber(value: Decimal | number): string {
   const num = new Decimal(value);
-  
+
   if (num.gte(1e9)) {
     return `${num.div(1e9).toFixed(2)}B`;
   } else if (num.gte(1e6)) {
@@ -155,7 +155,7 @@ export function formatCompactNumber(value: Decimal | number): string {
   } else if (num.gte(1e3)) {
     return `${num.div(1e3).toFixed(2)}K`;
   }
-  
+
   return num.toFixed(2);
 }
 
@@ -166,7 +166,7 @@ export function formatMarginLevel(equity: Decimal, marginUsed: Decimal): string 
   if (marginUsed.eq(0)) {
     return '∞';
   }
-  
+
   const marginLevel = equity.div(marginUsed).mul(100);
   return `${marginLevel.toFixed(2)}%`;
 }

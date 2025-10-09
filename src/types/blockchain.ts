@@ -1,4 +1,14 @@
-import type { Provider, Signer, TransactionRequest, TransactionResponse, ContractTransactionResponse } from 'ethers';
+import type {
+  PublicClient,
+  WalletClient,
+  Account,
+  Transport,
+  Chain,
+  Hash,
+  TransactionReceipt as ViemTransactionReceipt,
+  TransactionRequest as ViemTransactionRequest,
+  Log
+} from 'viem';
 
 export type ChainId = 8453 | 84531; // Base mainnet and testnet
 
@@ -36,7 +46,7 @@ export interface SignerConfig {
   privateKey?: string;
   mnemonic?: string;
   path?: string;
-  provider?: Provider;
+  provider?: any; // For injected providers (MetaMask, etc.)
 }
 
 export interface TransactionConfig {
@@ -89,8 +99,13 @@ export interface BlockchainEvent {
   removed: boolean;
 }
 
-export type ProviderType = Provider;
-export type SignerType = Signer;
-export type TransactionRequestType = TransactionRequest;
-export type TransactionResponseType = TransactionResponse;
-export type ContractTransactionResponseType = ContractTransactionResponse;
+// viem types (re-exports for convenience)
+export type ProviderType = PublicClient;
+export type SignerType = WalletClient;
+export type AccountType = Account;
+export type TransportType = Transport;
+export type ChainType = Chain;
+export type TransactionRequestType = ViemTransactionRequest;
+export type TransactionResponseType = Hash;
+export type TransactionReceiptType = ViemTransactionReceipt;
+export type LogType = Log;

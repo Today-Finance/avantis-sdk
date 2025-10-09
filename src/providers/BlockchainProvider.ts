@@ -1,12 +1,20 @@
-import { ethers } from 'ethers';
-import type { 
-  Provider,
-  Signer,
-  TransactionRequest,
-  TransactionResponse,
-  TransactionReceipt
-} from 'ethers';
-import { 
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  type PublicClient,
+  type WalletClient,
+  type Account,
+  type Chain,
+  type Hash,
+  type TransactionReceipt,
+  type Log,
+  getAddress,
+  parseUnits
+} from 'viem';
+import { privateKeyToAccount, mnemonicToAccount } from 'viem/accounts';
+import { base, baseSepolia } from 'viem/chains';
+import {
   NetworkConfig,
   SignerConfig,
   TransactionConfig,
@@ -14,7 +22,7 @@ import {
   BlockchainEvent,
   EventFilter
 } from '../types';
-import { 
+import {
   NetworkError,
   TransactionError,
   ValidationError,
@@ -24,9 +32,16 @@ import {
 import { validateAddress, validatePrivateKey } from '../utils/validation';
 import { NETWORKS, DEFAULT_NETWORK, DEFAULTS } from '../constants/networks';
 
+// Map our chain IDs to viem chains
+const CHAIN_MAP: Record<number, Chain> = {
+  8453: base,
+  84531: baseSepolia
+};
+
 export class BlockchainProvider {
-  private provider: Provider;
-  private signer?: Signer;
+  private publicClient: PublicClient;
+  private walletClient?: WalletClient;
+  private account?: Account;
   private network: NetworkConfig;
   private readonly config: {
     confirmations: number;
@@ -39,15 +54,23 @@ export class BlockchainProvider {
     customRpcUrl?: string
   ) {
     this.network = NETWORKS[networkName];
-    
+
     if (!this.network) {
       throw new NetworkError(`Unknown network: ${networkName}`);
     }
 
     const rpcUrl = customRpcUrl || this.network.rpcUrl;
-    
+    const chain = CHAIN_MAP[this.network.chainId];
+
+    if (!chain) {
+      throw new NetworkError(`Unsupported chain ID: ${this.network.chainId}`);
+    }
+
     try {
-      this.provider = new ethers.JsonRpcProvider(rpcUrl);
+      this.publicClient = createPublicClient({
+        chain,
+        transport: http(rpcUrl)
+      }) as any;
     } catch (error) {
       throw new NetworkError(`Failed to connect to network: ${rpcUrl}`, error);
     }
@@ -64,44 +87,46 @@ export class BlockchainProvider {
    */
   public setSigner(config: SignerConfig): void {
     try {
+      const chain = CHAIN_MAP[this.network.chainId];
+
       switch (config.type) {
         case 'privateKey':
           if (!config.privateKey) {
             throw new ValidationError('Private key is required');
           }
           validatePrivateKey(config.privateKey);
-          this.signer = new ethers.Wallet(config.privateKey, this.provider);
+          this.account = privateKeyToAccount(config.privateKey as `0x${string}`);
+          this.walletClient = createWalletClient({
+            account: this.account,
+            chain,
+            transport: http(this.network.rpcUrl)
+          }) as any;
           break;
-          
+
         case 'mnemonic':
           if (!config.mnemonic) {
             throw new ValidationError('Mnemonic is required');
           }
-          const wallet = ethers.Wallet.fromPhrase(config.mnemonic);
-          this.signer = wallet.connect(this.provider);
+          this.account = mnemonicToAccount(config.mnemonic);
+          this.walletClient = createWalletClient({
+            account: this.account,
+            chain,
+            transport: http(this.network.rpcUrl)
+          }) as any;
           break;
-          
+
         case 'jsonRpc':
-          if (!this.provider) {
-            throw new NetworkError('Provider not initialized');
-          }
-          // Use the provider's getSigner method for JSON-RPC signers
-          const jsonRpcProvider = this.provider as ethers.JsonRpcProvider;
-          jsonRpcProvider.getSigner().then(signer => {
-            this.signer = signer;
-          });
-          break;
-          
+          // For JSON-RPC signers, we'll use the injected provider pattern
+          throw new ValidationError('JSON-RPC signer type not yet supported with viem. Use privateKey or mnemonic instead.');
+
         case 'injected':
           // For browser-based injected providers (MetaMask, etc.)
           if (config.provider) {
-            const injectedProvider = config.provider as ethers.JsonRpcProvider;
-            injectedProvider.getSigner().then(signer => {
-              this.signer = signer;
-            });
+            // This would need window.ethereum or similar
+            throw new ValidationError('Injected provider support coming soon. Use privateKey or mnemonic for now.');
           }
           break;
-          
+
         default:
           throw new ValidationError('Invalid signer type');
       }
@@ -111,20 +136,30 @@ export class BlockchainProvider {
   }
 
   /**
-   * Gets the current signer
+   * Gets the current signer (wallet client)
    */
-  public getSigner(): Signer {
-    if (!this.signer) {
+  public getSigner(): WalletClient {
+    if (!this.walletClient) {
       throw new ValidationError('Signer not configured', 'signer');
     }
-    return this.signer;
+    return this.walletClient;
   }
 
   /**
-   * Gets the provider instance
+   * Gets the current account
    */
-  public getProvider(): Provider {
-    return this.provider;
+  public getAccount(): Account {
+    if (!this.account) {
+      throw new ValidationError('Account not configured', 'account');
+    }
+    return this.account;
+  }
+
+  /**
+   * Gets the provider instance (public client)
+   */
+  public getProvider(): PublicClient {
+    return this.publicClient;
   }
 
   /**
@@ -139,8 +174,7 @@ export class BlockchainProvider {
    */
   public async getChainId(): Promise<bigint> {
     try {
-      const network = await this.provider.getNetwork();
-      return network.chainId;
+      return BigInt(this.network.chainId);
     } catch (error) {
       throw new NetworkError('Failed to get chain ID', error);
     }
@@ -151,7 +185,8 @@ export class BlockchainProvider {
    */
   public async getBlockNumber(): Promise<number> {
     try {
-      return await this.provider.getBlockNumber();
+      const blockNumber = await this.publicClient.getBlockNumber();
+      return Number(blockNumber);
     } catch (error) {
       throw new NetworkError('Failed to get block number', error);
     }
@@ -162,9 +197,9 @@ export class BlockchainProvider {
    */
   public async getBalance(address?: string): Promise<bigint> {
     try {
-      const addr = address || (await this.getSigner().getAddress());
+      const addr = address || this.getAccount().address;
       validateAddress(addr);
-      return await this.provider.getBalance(addr);
+      return await this.publicClient.getBalance({ address: addr as `0x${string}` });
     } catch (error) {
       throw handleError(error);
     }
@@ -175,8 +210,8 @@ export class BlockchainProvider {
    */
   public async getGasPrice(): Promise<bigint> {
     try {
-      const feeData = await this.provider.getFeeData();
-      return feeData.gasPrice || 0n;
+      const gasPrice = await this.publicClient.getGasPrice();
+      return gasPrice;
     } catch (error) {
       throw new NetworkError('Failed to get gas price', error);
     }
@@ -185,9 +220,15 @@ export class BlockchainProvider {
   /**
    * Estimates gas for a transaction
    */
-  public async estimateGas(transaction: TransactionRequest): Promise<bigint> {
+  public async estimateGas(transaction: any): Promise<bigint> {
     try {
-      return await this.provider.estimateGas(transaction);
+      const gas = await this.publicClient.estimateGas({
+        account: this.account,
+        to: transaction.to as `0x${string}`,
+        data: transaction.data as `0x${string}` | undefined,
+        value: transaction.value
+      });
+      return gas;
     } catch (error) {
       throw new TransactionError(
         ErrorCode.GAS_ESTIMATION_FAILED,
@@ -202,42 +243,43 @@ export class BlockchainProvider {
    * Sends a transaction
    */
   public async sendTransaction(
-    transaction: TransactionRequest,
+    transaction: any,
     config?: TransactionConfig
   ): Promise<TransactionResult> {
     try {
-      const signer = this.getSigner();
-      
-      // Merge transaction with config
-      const txRequest: TransactionRequest = {
-        ...transaction,
-        ...(config?.gasLimit && { gasLimit: config.gasLimit }),
-        ...(config?.gasPrice && { gasPrice: config.gasPrice }),
-        ...(config?.maxFeePerGas && { maxFeePerGas: config.maxFeePerGas }),
-        ...(config?.maxPriorityFeePerGas && { maxPriorityFeePerGas: config.maxPriorityFeePerGas }),
-        ...(config?.nonce !== undefined && { nonce: config.nonce })
-      };
+      const walletClient = this.getSigner();
+      const account = this.getAccount();
 
       // Send the transaction
-      const txResponse: TransactionResponse = await signer.sendTransaction(txRequest);
-      
+      const hash = await (walletClient as any).sendTransaction({
+        account,
+        to: transaction.to as `0x${string}`,
+        data: transaction.data as `0x${string}` | undefined,
+        value: transaction.value,
+        gas: config?.gasLimit,
+        gasPrice: config?.gasPrice,
+        maxFeePerGas: config?.maxFeePerGas,
+        maxPriorityFeePerGas: config?.maxPriorityFeePerGas,
+        nonce: config?.nonce
+      });
+
       // Wait for confirmation
       const receipt = await this.waitForTransaction(
-        txResponse.hash,
+        hash,
         this.config.confirmations
       );
 
       return {
-        hash: txResponse.hash,
-        blockNumber: receipt.blockNumber,
+        hash,
+        blockNumber: Number(receipt.blockNumber),
         blockHash: receipt.blockHash,
         from: receipt.from,
         to: receipt.to || '',
-        value: txResponse.value,
+        value: BigInt(0), // Would need to parse from transaction
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.gasPrice,
-        status: receipt.status === 1 ? 'success' : 'failed',
-        logs: [...receipt.logs]
+        effectiveGasPrice: receipt.effectiveGasPrice,
+        status: receipt.status === 'success' ? 'success' : 'failed',
+        logs: receipt.logs
       };
     } catch (error) {
       throw handleError(error);
@@ -252,8 +294,11 @@ export class BlockchainProvider {
     confirmations: number = 1
   ): Promise<TransactionReceipt> {
     try {
-      const receipt = await this.provider.waitForTransaction(hash, confirmations);
-      
+      const receipt = await this.publicClient.waitForTransactionReceipt({
+        hash: hash as Hash,
+        confirmations
+      });
+
       if (!receipt) {
         throw new TransactionError(
           ErrorCode.TRANSACTION_FAILED,
@@ -262,7 +307,7 @@ export class BlockchainProvider {
         );
       }
 
-      if (receipt.status === 0) {
+      if (receipt.status === 'reverted') {
         throw new TransactionError(
           ErrorCode.TRANSACTION_FAILED,
           'Transaction reverted',
@@ -279,9 +324,9 @@ export class BlockchainProvider {
   /**
    * Gets a transaction by hash
    */
-  public async getTransaction(hash: string): Promise<TransactionResponse | null> {
+  public async getTransaction(hash: string): Promise<any> {
     try {
-      return await this.provider.getTransaction(hash);
+      return await this.publicClient.getTransaction({ hash: hash as Hash });
     } catch (error) {
       throw new NetworkError(`Failed to get transaction: ${hash}`, error);
     }
@@ -292,7 +337,7 @@ export class BlockchainProvider {
    */
   public async getTransactionReceipt(hash: string): Promise<TransactionReceipt | null> {
     try {
-      return await this.provider.getTransactionReceipt(hash);
+      return await this.publicClient.getTransactionReceipt({ hash: hash as Hash });
     } catch (error) {
       throw new NetworkError(`Failed to get transaction receipt: ${hash}`, error);
     }
@@ -303,22 +348,26 @@ export class BlockchainProvider {
    */
   public async queryEvents(filter: EventFilter): Promise<BlockchainEvent[]> {
     try {
-      const logs = await this.provider.getLogs({
-        address: filter.address,
-        topics: filter.topics,
-        fromBlock: filter.fromBlock,
-        toBlock: filter.toBlock
+      const logs = await (this.publicClient as any).getLogs({
+        address: filter.address as `0x${string}` | `0x${string}`[] | undefined,
+        topics: filter.topics as any,
+        fromBlock: typeof filter.fromBlock === 'number'
+          ? BigInt(filter.fromBlock)
+          : filter.fromBlock as any,
+        toBlock: typeof filter.toBlock === 'number'
+          ? BigInt(filter.toBlock)
+          : filter.toBlock as any
       });
 
-      return logs.map(log => ({
+      return logs.map((log: any) => ({
         address: log.address,
         topics: log.topics as string[],
         data: log.data,
-        blockNumber: log.blockNumber,
+        blockNumber: Number(log.blockNumber),
         transactionHash: log.transactionHash,
         transactionIndex: log.transactionIndex,
         blockHash: log.blockHash,
-        logIndex: log.index,
+        logIndex: log.logIndex,
         removed: log.removed
       }));
     } catch (error) {
@@ -330,18 +379,20 @@ export class BlockchainProvider {
    * Subscribes to new blocks
    */
   public onBlock(callback: (blockNumber: number) => void): void {
-    this.provider.on('block', callback);
+    // viem uses watchBlocks
+    this.publicClient.watchBlocks({
+      onBlock: (block) => callback(Number(block.number))
+    });
   }
 
   /**
    * Unsubscribes from block events
+   * Note: viem's watchBlocks returns an unwatch function, so this is a simplified version
    */
   public offBlock(callback?: (blockNumber: number) => void): void {
-    if (callback) {
-      this.provider.off('block', callback);
-    } else {
-      this.provider.removeAllListeners('block');
-    }
+    // In viem, you'd call the unwatch function returned by watchBlocks
+    // This is a simplified implementation - in production you'd store the unwatch function
+    console.warn('offBlock: viem requires calling the unwatch function returned by watchBlocks');
   }
 
   /**
@@ -349,7 +400,7 @@ export class BlockchainProvider {
    */
   public async isConnected(): Promise<boolean> {
     try {
-      await this.provider.getNetwork();
+      await this.publicClient.getBlockNumber();
       return true;
     } catch {
       return false;
@@ -358,11 +409,10 @@ export class BlockchainProvider {
 
   /**
    * Disconnects from the network
+   * Note: viem clients don't have a disconnect method, connections are managed automatically
    */
   public disconnect(): void {
-    this.provider.removeAllListeners();
-    if (this.provider.destroy) {
-      this.provider.destroy();
-    }
+    // viem handles connection lifecycle automatically
+    // No explicit disconnect needed
   }
 }

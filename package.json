@@ -61,9 +61,9 @@
   "dependencies": {
     "axios": "^1.12.2",
     "decimal.js": "^10.6.0",
-    "ethers": "^6.15.0",
     "eventemitter3": "^5.0.1",
     "isomorphic-ws": "^5.0.0",
+    "viem": "^2.21.60",
     "ws": "^8.18.3",
     "zod": "^4.1.11"
   },

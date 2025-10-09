@@ -3,8 +3,7 @@
  * Provides access to price feeds and pair configuration
  */
 
-import { ethers } from 'ethers';
-import type { Contract } from 'ethers';
+import { getContract, getAddress as viemGetAddress, type PublicClient } from 'viem';
 import Decimal from 'decimal.js';
 import { BlockchainProvider } from '../providers/BlockchainProvider';
 import { NetworkConfig } from '../types';
@@ -38,8 +37,8 @@ export interface PriceData {
 
 export class PriceClient {
   private blockchain: BlockchainProvider;
-  private priceAggregatorContract?: Contract;
-  private pairInfosContract?: Contract;
+  private priceAggregatorContract?: any;
+  private pairInfosContract?: any;
   private network: NetworkConfig;
   private pairInfoCache: Map<number, PairInfo> = new Map();
   private allPairsCache: PairInfo[] | null = null;
@@ -59,24 +58,24 @@ export class PriceClient {
    * Initializes smart contract instances
    */
   private initializeContracts(): void {
-    const provider = this.blockchain.getProvider();
-    
+    const publicClient = this.blockchain.getProvider();
+
     // Initialize PriceAggregator contract
     if (this.network.contracts.priceAggregator) {
-      this.priceAggregatorContract = new ethers.Contract(
-        this.network.contracts.priceAggregator,
-        PriceAggregatorContractABI,
-        provider
-      );
+      this.priceAggregatorContract = getContract({
+        address: this.network.contracts.priceAggregator as `0x${string}`,
+        abi: PriceAggregatorContractABI,
+        client: publicClient as any as any
+      });
     }
-    
+
     // Initialize PairInfos contract
     if (this.network.contracts.pairInfos) {
-      this.pairInfosContract = new ethers.Contract(
-        this.network.contracts.pairInfos,
-        PairInfosContractABI,
-        provider
-      );
+      this.pairInfosContract = getContract({
+        address: this.network.contracts.pairInfos as `0x${string}`,
+        abi: PairInfosContractABI,
+        client: publicClient as any as any
+      });
     }
   }
 
@@ -88,9 +87,9 @@ export class PriceClient {
       if (!this.priceAggregatorContract) {
         throw new Error('PriceAggregator contract not available');
       }
-      
-      const priceData = await this.priceAggregatorContract.getPrice(pairIndex);
-      
+
+      const priceData = await this.priceAggregatorContract.read.getPrice([BigInt(pairIndex)]);
+
       return {
         price: new Decimal(formatUSDC(priceData.price)),
         timestamp: new Date(Number(priceData.timestamp) * 1000),
@@ -109,10 +108,12 @@ export class PriceClient {
       if (!this.priceAggregatorContract) {
         throw new Error('PriceAggregator contract not available');
       }
-      
-      const prices = await this.priceAggregatorContract.getMultiplePrices(pairIndices);
+
+      const prices = await this.priceAggregatorContract.read.getMultiplePrices([
+        pairIndices.map(i => BigInt(i))
+      ]);
       const priceMap = new Map<number, PriceData>();
-      
+
       prices.forEach((priceData: any, index: number) => {
         priceMap.set(pairIndices[index], {
           price: new Decimal(formatUSDC(priceData.price)),
@@ -120,7 +121,7 @@ export class PriceClient {
           confidence: Number(priceData.confidence)
         });
       });
-      
+
       return priceMap;
     } catch (error) {
       throw handleError(error);
@@ -144,7 +145,7 @@ export class PriceClient {
         throw new Error('PairInfos contract not available');
       }
 
-      const info = await this.pairInfosContract.pairInfo(pairIndex);
+      const info = await this.pairInfosContract.read.pairInfo([BigInt(pairIndex)]);
 
       const pairInfo: PairInfo = {
         id: pairIndex,
@@ -193,20 +194,33 @@ export class PriceClient {
       }
 
       // Get pairs count from PairStorage contract
-      const provider = this.blockchain.getProvider();
+      const publicClient = this.blockchain.getProvider();
       const pairStorageAddress = this.network.contracts.pairStorage;
       if (!pairStorageAddress) {
         throw new Error('PairStorage contract address not configured');
       }
 
       // Normalize address to proper checksum format
-      const normalizedAddress = ethers.getAddress(pairStorageAddress);
+      const normalizedAddress = viemGetAddress(pairStorageAddress);
 
       // Simple ABI for pairsCount function
-      const pairStorageAbi = ['function pairsCount() external view returns (uint256)'];
-      const pairStorageContract = new ethers.Contract(normalizedAddress, pairStorageAbi, provider);
+      const pairStorageAbi = [
+        {
+          name: 'pairsCount',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [{ name: '', type: 'uint256' }]
+        }
+      ] as const;
 
-      const count = await pairStorageContract.pairsCount();
+      const pairStorageContract: any = getContract({
+        address: normalizedAddress,
+        abi: pairStorageAbi,
+        client: publicClient as any
+      });
+
+      const count = await pairStorageContract.read.pairsCount();
       const totalPairs = Number(count);
       const pairInfos: PairInfo[] = [];
       const errors: Array<{ index: number; error: string }> = [];
@@ -304,9 +318,9 @@ export class PriceClient {
       if (!this.pairInfosContract) {
         throw new Error('PairInfos contract not available');
       }
-      
-      const fees = await this.pairInfosContract.getTradingFees(pairIndex);
-      
+
+      const fees = await this.pairInfosContract.read.getTradingFees([BigInt(pairIndex)]);
+
       return {
         openFee: Number(fees.openFee) / 1e10,
         closeFee: Number(fees.closeFee) / 1e10,
@@ -326,8 +340,8 @@ export class PriceClient {
       if (!this.priceAggregatorContract) {
         return false;
       }
-      
-      return await this.priceAggregatorContract.isPriceValid(pairIndex);
+
+      return await this.priceAggregatorContract.read.isPriceValid([BigInt(pairIndex)]);
     } catch (error) {
       throw handleError(error);
     }
