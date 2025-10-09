@@ -51,8 +51,8 @@ async function testOpenPosition() {
     const positionParams = {
       pair: "ETH/USD",
       side: PositionSide.LONG,
-      size: "10", // 10 USDC position size
-      leverage: 1, // 1x leverage
+      size: 22, // 10 USDC position size
+      leverage: 2, // 1x leverage
       slippage: 0.5, // 0.5% slippage tolerance
     };
 

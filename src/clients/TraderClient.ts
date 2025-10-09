@@ -39,6 +39,7 @@ import { getPairIndex, getPairName, getAllPairs, getPairsByCategory } from '../u
 import {
   formatUSDC,
   toUSDCUnits,
+  toLeverageUnits,
   formatETH,
   toWei
 } from '../utils/formatting';
@@ -374,7 +375,7 @@ export class TraderClient extends EventEmitter {
         positionSizeUSDC: positionSizeUnits,
         openPrice: openPriceUnits,
         buy: isLong,
-        leverage: params.leverage,
+        leverage: toLeverageUnits(params.leverage),
         tp: takeProfitUnits,
         sl: stopLossUnits,
         timestamp: 0 // Current timestamp
@@ -1088,7 +1089,7 @@ export class TraderClient extends EventEmitter {
         positionSizeUSDC: toUSDCUnits(size),
         openPrice: params.openPrice ? toUSDCUnits(params.openPrice) : 0,
         buy: isLong,
-        leverage: params.leverage,
+        leverage: toLeverageUnits(params.leverage),
         tp: params.takeProfit ? toUSDCUnits(params.takeProfit) : 0,
         sl: params.stopLoss ? toUSDCUnits(params.stopLoss) : 0,
         timestamp: 0

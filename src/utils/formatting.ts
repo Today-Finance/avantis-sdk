@@ -58,6 +58,14 @@ export function toUSDCUnits(amount: Decimal | number | string): bigint {
 }
 
 /**
+ * Converts leverage to contract units (10 decimals)
+ * Avantis contracts expect leverage with 10 decimal places
+ */
+export function toLeverageUnits(leverage: number): bigint {
+  return BigInt(Math.floor(leverage * 1e10));
+}
+
+/**
  * Formats ETH amount (18 decimals)
  */
 export function formatETH(amount: bigint | string): string {
