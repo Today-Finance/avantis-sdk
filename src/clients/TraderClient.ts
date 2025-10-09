@@ -1,7 +1,13 @@
-import { getContract, parseUnits, decodeEventLog, encodeFunctionData, parseEther } from 'viem';
-import Decimal from 'decimal.js';
-import { EventEmitter } from 'eventemitter3';
-import { BlockchainProvider } from '../providers/BlockchainProvider';
+import {
+  getContract,
+  parseUnits,
+  decodeEventLog,
+  encodeFunctionData,
+  parseEther,
+} from "viem";
+import Decimal from "decimal.js";
+import { EventEmitter } from "eventemitter3";
+import { BlockchainProvider } from "../providers/BlockchainProvider";
 import {
   Position,
   OpenPositionParams,
@@ -22,8 +28,8 @@ import {
   UpdateMarginParams,
   MarginUpdateType,
   ExecuteLimitOrderParams,
-  LimitOrderType
-} from '../types';
+  LimitOrderType,
+} from "../types";
 import {
   validateAddress,
   validateLeverage,
@@ -33,30 +39,44 @@ import {
   validate,
   OpenPositionParamsSchema,
   ClosePositionParamsSchema,
-  UpdatePositionParamsSchema
-} from '../utils/validation';
-import { getPairIndex, getPairName, getAllPairs, getPairsByCategory } from '../utils/pairs';
+  UpdatePositionParamsSchema,
+} from "../utils/validation";
+import {
+  getPairIndex,
+  getPairName,
+  getAllPairs,
+  getPairsByCategory,
+} from "../utils/pairs";
 import {
   formatUSDC,
   toUSDCUnits,
   toLeverageUnits,
   formatETH,
-  toWei
-} from '../utils/formatting';
+  toWei,
+} from "../utils/formatting";
 import {
   TradingError,
   TransactionError,
   ValidationError,
   ErrorCode,
-  handleError
-} from '../utils/errors';
-import { NETWORKS, TRADING_PAIRS, FEES, DEFAULTS } from '../constants/networks';
-import { TradingContractABI, USDCContractABI, Multicall3ContractABI, TradingStorageContractABI } from '../contracts';
-import { FeeManager } from '../fees/FeeManager';
-import { MulticallBundler } from '../fees/MulticallBundler';
-import type { PlatformFeeConfig, PlatformFeeParams, FeeBreakdown } from '../types/platform-fees';
-import { PythClient } from './PythClient';
-import { SocketAPIClient } from './SocketAPIClient';
+  handleError,
+} from "../utils/errors";
+import { NETWORKS, TRADING_PAIRS, FEES, DEFAULTS } from "../constants/networks";
+import {
+  TradingContractABI,
+  USDCContractABI,
+  Multicall3ContractABI,
+  TradingStorageContractABI,
+} from "../contracts";
+import { FeeManager } from "../fees/FeeManager";
+import { MulticallBundler } from "../fees/MulticallBundler";
+import type {
+  PlatformFeeConfig,
+  PlatformFeeParams,
+  FeeBreakdown,
+} from "../types/platform-fees";
+import { PythClient } from "./PythClient";
+import { SocketAPIClient } from "./SocketAPIClient";
 
 export class TraderClient extends EventEmitter {
   private blockchain: BlockchainProvider;
@@ -73,7 +93,7 @@ export class TraderClient extends EventEmitter {
   private readonly MARKET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
-    networkName: keyof typeof NETWORKS = 'base',
+    networkName: keyof typeof NETWORKS = "base",
     customRpcUrl?: string
   ) {
     super();
@@ -85,12 +105,12 @@ export class TraderClient extends EventEmitter {
     this.usdcContract = getContract({
       address: this.network.contracts.usdc as `0x${string}`,
       abi: USDCContractABI,
-      client: publicClient as any
+      client: publicClient as any,
     });
 
     // Initialize Pyth client for price oracle data
     this.pythClient = new PythClient({
-      network: networkName === 'base-sepolia' ? 'testnet' : 'mainnet'
+      network: networkName === "base-sepolia" ? "testnet" : "mainnet",
     });
 
     // Initialize Socket API client for dynamic pair data
@@ -106,11 +126,14 @@ export class TraderClient extends EventEmitter {
     const publicClient = this.blockchain.getProvider();
 
     // Initialize trading contract if available
-    if (this.network.contracts.trading !== '0x0000000000000000000000000000000000000000') {
+    if (
+      this.network.contracts.trading !==
+      "0x0000000000000000000000000000000000000000"
+    ) {
       this.tradingContract = getContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        client: publicClient as any
+        client: publicClient as any,
       });
     }
   }
@@ -123,7 +146,7 @@ export class TraderClient extends EventEmitter {
 
     const account = this.blockchain.getAccount();
 
-    this.emit('signerSet', account.address);
+    this.emit("signerSet", account.address);
   }
 
   /**
@@ -156,11 +179,11 @@ export class TraderClient extends EventEmitter {
       const address = await this.getAddress();
       const [balance, usdcBalance] = await Promise.all([
         this.blockchain.getBalance(),
-        this.getUSDCBalance()
+        this.getUSDCBalance(),
       ]);
 
       const positions = await this.getPositions();
-      
+
       let totalCollateral = new Decimal(0);
       let marginUsed = new Decimal(0);
       let unrealizedPnl = new Decimal(0);
@@ -175,7 +198,7 @@ export class TraderClient extends EventEmitter {
 
       const freeCollateral = totalCollateral.minus(marginUsed);
       const equity = totalCollateral.plus(unrealizedPnl);
-      const marginLevel = marginUsed.gt(0) 
+      const marginLevel = marginUsed.gt(0)
         ? equity.div(marginUsed).mul(100).toNumber()
         : 100;
 
@@ -190,7 +213,7 @@ export class TraderClient extends EventEmitter {
         unrealizedPnl,
         realizedPnl,
         positions,
-        marginLevel
+        marginLevel,
       };
     } catch (error) {
       throw handleError(error);
@@ -202,10 +225,12 @@ export class TraderClient extends EventEmitter {
    */
   public async getUSDCBalance(address?: string): Promise<Decimal> {
     try {
-      const addr = address || await this.getAddress();
+      const addr = address || (await this.getAddress());
       validateAddress(addr);
 
-      const balance = await this.usdcContract.read.balanceOf([addr as `0x${string}`]);
+      const balance = await this.usdcContract.read.balanceOf([
+        addr as `0x${string}`,
+      ]);
       return new Decimal(formatUSDC(balance));
     } catch (error) {
       throw handleError(error);
@@ -217,7 +242,7 @@ export class TraderClient extends EventEmitter {
    */
   public async getTradingAllowance(address?: string): Promise<Decimal> {
     try {
-      const addr = address || await this.getAddress();
+      const addr = address || (await this.getAddress());
       validateAddress(addr);
 
       if (!this.tradingContract) {
@@ -226,7 +251,7 @@ export class TraderClient extends EventEmitter {
 
       const allowance = await this.usdcContract.read.allowance([
         addr as `0x${string}`,
-        this.network.contracts.trading as `0x${string}`
+        this.network.contracts.trading as `0x${string}`,
       ]);
 
       return new Decimal(formatUSDC(allowance));
@@ -239,7 +264,7 @@ export class TraderClient extends EventEmitter {
    * Approves USDC for trading
    */
   public async approveUSDCForTrading(
-    amount: Decimal | number | string = '1000000'
+    amount: Decimal | number | string = "1000000"
   ): Promise<TradeResponse> {
     try {
       const amountDecimal = new Decimal(amount);
@@ -250,23 +275,23 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.usdc as `0x${string}`,
         abi: USDCContractABI,
-        functionName: 'approve',
+        functionName: "approve",
         args: [this.network.contracts.trading as `0x${string}`, amountUnits],
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('usdcApproved', {
+      this.emit("usdcApproved", {
         amount: amountDecimal,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -276,7 +301,9 @@ export class TraderClient extends EventEmitter {
   /**
    * Opens a new trading position (market or limit order)
    */
-  public async openPosition(params: OpenPositionParams): Promise<TradeResponse> {
+  public async openPosition(
+    params: OpenPositionParams
+  ): Promise<TradeResponse> {
     try {
       // Validate parameters
       const validated = validate(OpenPositionParamsSchema, params);
@@ -285,7 +312,7 @@ export class TraderClient extends EventEmitter {
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
 
@@ -303,38 +330,49 @@ export class TraderClient extends EventEmitter {
         case OrderType.LIMIT:
           orderTypeValue = OrderTypeValue.LIMIT;
           if (!params.openPrice) {
-            throw new ValidationError('Open price is required for limit orders', 'openPrice');
+            throw new ValidationError(
+              "Open price is required for limit orders",
+              "openPrice"
+            );
           }
           break;
         case OrderType.STOP:
           orderTypeValue = OrderTypeValue.STOP;
           if (!params.openPrice) {
-            throw new ValidationError('Stop price is required for stop orders', 'openPrice');
+            throw new ValidationError(
+              "Stop price is required for stop orders",
+              "openPrice"
+            );
           }
           break;
         case OrderType.STOP_LIMIT:
           orderTypeValue = OrderTypeValue.STOP_LIMIT;
           if (!params.openPrice) {
-            throw new ValidationError('Open price is required for stop-limit orders', 'openPrice');
+            throw new ValidationError(
+              "Open price is required for stop-limit orders",
+              "openPrice"
+            );
           }
           break;
         default:
           orderTypeValue = OrderTypeValue.MARKET;
       }
-      
+
       // Validate position size using dynamic minimums from Socket API
       const size = validatePositionSize(
         params.size,
         marketConfig.minPositionSizeUSDC,
-        marketConfig.maxPositionSizeUSDC.gt(0) ? marketConfig.maxPositionSizeUSDC : new Decimal(1000000)
+        marketConfig.maxPositionSizeUSDC.gt(0)
+          ? marketConfig.maxPositionSizeUSDC
+          : new Decimal(1000000)
       );
 
       // Validate leverage using dynamic maximums from Socket API
       validateLeverage(params.leverage, marketConfig.maxLeverage);
-      
+
       // Calculate collateral required
       const collateral = size.div(params.leverage);
-      
+
       // Check USDC balance
       const balance = await this.getUSDCBalance();
       if (balance.lt(collateral)) {
@@ -344,7 +382,7 @@ export class TraderClient extends EventEmitter {
           params.pair
         );
       }
-      
+
       // Check allowance
       const allowance = await this.getTradingAllowance();
       if (allowance.lt(collateral)) {
@@ -354,24 +392,31 @@ export class TraderClient extends EventEmitter {
           params.pair
         );
       }
-      
+
       // Get signer address
       const address = await this.getAddress();
-      
+
       // Prepare trade struct for contract
       const isLong = params.side === PositionSide.LONG;
       const collateralUnits = toUSDCUnits(collateral);
       const positionSizeUnits = toUSDCUnits(size);
       const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
-      const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
-      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
+      const takeProfitUnits = params.takeProfit
+        ? toUSDCUnits(params.takeProfit)
+        : 0;
+      const slippageUnits = parseUnits(
+        ((params.slippage || 0.5) / 100).toString(),
+        10
+      );
 
       // Get current market price for market orders
       let openPriceUnits: bigint;
       if (params.openPrice) {
         // For limit orders, use provided price with 10 decimals
         const limitPrice = new Decimal(params.openPrice);
-        openPriceUnits = BigInt(limitPrice.mul(new Decimal(10).pow(10)).toFixed(0));
+        openPriceUnits = BigInt(
+          limitPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+        );
       } else {
         // For market orders, fetch current price from Pyth
         const priceData = await this.pythClient.getLatestPrice(params.pair);
@@ -381,7 +426,9 @@ export class TraderClient extends EventEmitter {
         const expo = priceData.expo;
         const pythPrice = new Decimal(priceData.price.toString());
         const exponentAdjustment = 10 + expo; // e.g., 10 + (-8) = 2
-        openPriceUnits = BigInt(pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0));
+        openPriceUnits = BigInt(
+          pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0)
+        );
       }
 
       const tradeStruct = {
@@ -389,26 +436,28 @@ export class TraderClient extends EventEmitter {
         pairIndex: pairIndex,
         index: 0, // This will be assigned by the contract
         initialPosToken: 0, // Always 0 for new positions (not collateral)
-        positionSizeUSDC: positionSizeUnits,
-        openPrice: openPriceUnits,
+        positionSizeUSDC: Number(positionSizeUnits),
+        openPrice: Number(openPriceUnits),
         buy: isLong,
-        leverage: toLeverageUnits(params.leverage),
+        leverage: Number(toLeverageUnits(params.leverage)),
         tp: takeProfitUnits,
         sl: stopLossUnits,
-        timestamp: Math.floor(Date.now() / 1000) // Current Unix timestamp
+        timestamp: Math.floor(Date.now() / 1000), // Current Unix timestamp
       };
 
+      console.log("tradeStruct === ", tradeStruct);
+
       // Execute transaction with proper execution fee
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'openTrade',
+        functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
         value: executionFee,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
@@ -416,9 +465,9 @@ export class TraderClient extends EventEmitter {
       // Parse events based on order type
       let eventName: string;
       if (orderType === OrderType.MARKET) {
-        eventName = 'MarketOrderInitiated';
+        eventName = "MarketOrderInitiated";
       } else {
-        eventName = 'LimitOrderInitiated';
+        eventName = "LimitOrderInitiated";
       }
 
       // Note: Event parsing simplified - events will be emitted from contract
@@ -431,18 +480,21 @@ export class TraderClient extends EventEmitter {
         // as they go through oracle execution
       }
 
-      this.emit(orderType === OrderType.MARKET ? 'positionOpened' : 'limitOrderPlaced', {
-        position,
-        transactionHash: receipt.transactionHash,
-        orderType
-      });
+      this.emit(
+        orderType === OrderType.MARKET ? "positionOpened" : "limitOrderPlaced",
+        {
+          position,
+          transactionHash: receipt.transactionHash,
+          orderType,
+        }
+      );
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         position,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -452,59 +504,61 @@ export class TraderClient extends EventEmitter {
   /**
    * Closes an existing position
    */
-  public async closePosition(params: ClosePositionParams): Promise<TradeResponse> {
+  public async closePosition(
+    params: ClosePositionParams
+  ): Promise<TradeResponse> {
     try {
       // Validate parameters
       const validated = validate(ClosePositionParamsSchema, params);
-      
+
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       // Parse position ID to get pair index and position index
       // Position ID format should be "pairIndex-positionIndex"
-      const [pairIndexStr, positionIndexStr] = params.positionId.split('-');
+      const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
       if (!pairIndexStr || !positionIndexStr) {
         throw new ValidationError(
           'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
-          'positionId'
+          "positionId"
         );
       }
-      
+
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
-      
+
       // Determine close amount (0 means close full position)
       const closeAmount = params.size ? toUSDCUnits(params.size) : 0;
 
       // Execute closeTradeMarket with execution fee
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'closeTradeMarket',
+        functionName: "closeTradeMarket",
         args: [pairIndex, positionIndex, closeAmount],
         value: executionFee,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('positionClosed', {
+      this.emit("positionClosed", {
         positionId: params.positionId,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -514,32 +568,38 @@ export class TraderClient extends EventEmitter {
   /**
    * Updates position stop loss and take profit
    */
-  public async updatePosition(params: UpdatePositionParams): Promise<TradeResponse> {
+  public async updatePosition(
+    params: UpdatePositionParams
+  ): Promise<TradeResponse> {
     try {
       // Validate parameters
       const validated = validate(UpdatePositionParamsSchema, params);
-      
+
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       // Parse position ID to get pair index and position index
-      const [pairIndexStr, positionIndexStr] = params.positionId.split('-');
+      const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
       if (!pairIndexStr || !positionIndexStr) {
         throw new ValidationError(
           'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
-          'positionId'
+          "positionId"
         );
       }
-      
+
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
 
-      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : BigInt(0);
-      const takeProfitUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : BigInt(0);
+      const stopLossUnits = params.stopLoss
+        ? toUSDCUnits(params.stopLoss)
+        : BigInt(0);
+      const takeProfitUnits = params.takeProfit
+        ? toUSDCUnits(params.takeProfit)
+        : BigInt(0);
 
       // Get pair name from Socket API for Pyth price data
       const pairName = await this.getPairNameFromAPI(pairIndex);
@@ -552,7 +612,10 @@ export class TraderClient extends EventEmitter {
         try {
           priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
         } catch (error) {
-          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
+          console.warn(
+            `Failed to fetch Pyth price data for ${pairName}:`,
+            error
+          );
         }
       }
 
@@ -563,31 +626,31 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'updateTpAndSl',
+        functionName: "updateTpAndSl",
         args: [
           pairIndex,
           positionIndex,
-          stopLossUnits,    // Stop loss FIRST
-          takeProfitUnits,  // Take profit SECOND
-          priceUpdateData   // Pyth price update data
+          stopLossUnits, // Stop loss FIRST
+          takeProfitUnits, // Take profit SECOND
+          priceUpdateData, // Pyth price update data
         ],
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('positionUpdated', {
+      this.emit("positionUpdated", {
         positionId: params.positionId,
         stopLoss: params.stopLoss,
         takeProfit: params.takeProfit,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -597,29 +660,43 @@ export class TraderClient extends EventEmitter {
   /**
    * Gets a specific position from TradingStorage
    */
-  public async getPosition(pairIndex: number, positionIndex: number, trader?: string): Promise<Position | null> {
+  public async getPosition(
+    pairIndex: number,
+    positionIndex: number,
+    trader?: string
+  ): Promise<Position | null> {
     try {
-      const addr = trader || await this.getAddress();
+      const addr = trader || (await this.getAddress());
 
       // Get position data from TradingStorage via storage contract interface
       const publicClient = this.blockchain.getProvider();
       const tradingStorageAddress = this.network.contracts.tradingStorage;
 
-      if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
+      if (
+        !tradingStorageAddress ||
+        tradingStorageAddress === "0x0000000000000000000000000000000000000000"
+      ) {
         return null;
       }
 
       const tradingStorageContract: any = getContract({
         address: tradingStorageAddress as `0x${string}`,
         abi: TradingStorageContractABI,
-        client: publicClient as any
+        client: publicClient as any,
       });
 
       // Call openTrades(trader, pairIndex, index)
-      const trade = await tradingStorageContract.read.openTrades([addr as `0x${string}`, pairIndex, positionIndex]);
+      const trade = await tradingStorageContract.read.openTrades([
+        addr as `0x${string}`,
+        pairIndex,
+        positionIndex,
+      ]);
 
       // Check if trade exists (trader address should not be zero)
-      if (!trade || trade.trader === '0x0000000000000000000000000000000000000000') {
+      if (
+        !trade ||
+        trade.trader === "0x0000000000000000000000000000000000000000"
+      ) {
         return null;
       }
 
@@ -635,7 +712,7 @@ export class TraderClient extends EventEmitter {
    */
   public async getPositions(address?: string): Promise<Position[]> {
     try {
-      const addr = address || await this.getAddress();
+      const addr = address || (await this.getAddress());
 
       // Get all trading pairs from Socket API
       const markets = await this.socketAPI.getAllMarkets();
@@ -665,7 +742,11 @@ export class TraderClient extends EventEmitter {
   /**
    * Parses position data from contract and enriches with calculations
    */
-  private async parsePositionData(trade: any, pairIndex: number, positionIndex: number): Promise<Position> {
+  private async parsePositionData(
+    trade: any,
+    pairIndex: number,
+    positionIndex: number
+  ): Promise<Position> {
     const pairName = await this.getPairNameFromAPI(pairIndex);
     const side = trade.buy ? PositionSide.LONG : PositionSide.SHORT;
     const collateral = new Decimal(formatUSDC(trade.initialPosToken));
@@ -674,20 +755,32 @@ export class TraderClient extends EventEmitter {
     const entryPrice = new Decimal(formatUSDC(trade.openPrice));
 
     // Calculate liquidation price
-    const { calculateLiquidationPrice, calculateUnrealizedPnL } = await import('../utils/calculations');
-    const liquidationPrice = calculateLiquidationPrice(entryPrice, leverage, side);
+    const { calculateLiquidationPrice, calculateUnrealizedPnL } = await import(
+      "../utils/calculations"
+    );
+    const liquidationPrice = calculateLiquidationPrice(
+      entryPrice,
+      leverage,
+      side
+    );
 
     // Get current mark price (try to fetch, fallback to entry price)
     let markPrice = entryPrice;
     try {
       // Try to get current price from price aggregator contract if available
-      if (this.network.contracts.priceAggregator && this.network.contracts.priceAggregator !== '0x0000000000000000000000000000000000000000') {
+      if (
+        this.network.contracts.priceAggregator &&
+        this.network.contracts.priceAggregator !==
+          "0x0000000000000000000000000000000000000000"
+      ) {
         const priceAggregatorContract: any = getContract({
           address: this.network.contracts.priceAggregator as `0x${string}`,
-          abi: (await import('../contracts')).PriceAggregatorContractABI,
-          client: this.blockchain.getProvider() as any
+          abi: (await import("../contracts")).PriceAggregatorContractABI,
+          client: this.blockchain.getProvider() as any,
         });
-        const priceData = await priceAggregatorContract.read.getPrice([pairIndex]);
+        const priceData = await priceAggregatorContract.read.getPrice([
+          pairIndex,
+        ]);
         markPrice = new Decimal(formatUSDC(priceData.price || priceData[0]));
       }
     } catch {
@@ -695,7 +788,13 @@ export class TraderClient extends EventEmitter {
     }
 
     // Calculate unrealized PnL
-    const unrealizedPnl = calculateUnrealizedPnL(entryPrice, markPrice, size, side, leverage);
+    const unrealizedPnl = calculateUnrealizedPnL(
+      entryPrice,
+      markPrice,
+      size,
+      side,
+      leverage
+    );
 
     // Calculate maintenance margin (typically 0.5% of position size)
     const maintenanceMargin = size.mul(0.005);
@@ -713,37 +812,45 @@ export class TraderClient extends EventEmitter {
       liquidationPrice,
       unrealizedPnl,
       realizedPnl: new Decimal(0), // Not tracked in this version
-      stopLoss: trade.sl && Number(trade.sl) > 0 ? new Decimal(formatUSDC(trade.sl)) : undefined,
-      takeProfit: trade.tp && Number(trade.tp) > 0 ? new Decimal(formatUSDC(trade.tp)) : undefined,
+      stopLoss:
+        trade.sl && Number(trade.sl) > 0
+          ? new Decimal(formatUSDC(trade.sl))
+          : undefined,
+      takeProfit:
+        trade.tp && Number(trade.tp) > 0
+          ? new Decimal(formatUSDC(trade.tp))
+          : undefined,
       margin: collateral,
       maintenanceMargin,
       status: PositionStatus.OPEN,
       openedAt: new Date(Number(trade.timestamp) * 1000),
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
     };
   }
 
   /**
    * Cancels a pending limit order
    */
-  public async cancelLimitOrder(params: CancelLimitOrderParams): Promise<TradeResponse> {
+  public async cancelLimitOrder(
+    params: CancelLimitOrderParams
+  ): Promise<TradeResponse> {
     try {
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       // Execute cancelOpenLimitOrder
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'cancelOpenLimitOrder',
+        functionName: "cancelOpenLimitOrder",
         args: [params.pairIndex, params.orderIndex],
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
@@ -751,17 +858,17 @@ export class TraderClient extends EventEmitter {
       // Note: Event parsing simplified - events will be emitted from contract
       const event = receipt.logs[0]; // First log typically contains the event
 
-      this.emit('limitOrderCanceled', {
+      this.emit("limitOrderCanceled", {
         pairIndex: params.pairIndex,
         orderIndex: params.orderIndex,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -771,17 +878,22 @@ export class TraderClient extends EventEmitter {
   /**
    * Updates a pending limit order
    */
-  public async updateLimitOrder(params: UpdateLimitOrderParams): Promise<TradeResponse> {
+  public async updateLimitOrder(
+    params: UpdateLimitOrderParams
+  ): Promise<TradeResponse> {
     try {
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       const priceUnits = toUSDCUnits(params.price);
-      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
+      const slippageUnits = parseUnits(
+        ((params.slippage || 0.5) / 100).toString(),
+        10
+      );
       const tpUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
       const slUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
 
@@ -791,9 +903,16 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'updateOpenLimitOrder',
-        args: [params.pairIndex, params.orderIndex, priceUnits, slippageUnits, tpUnits, slUnits],
-        account
+        functionName: "updateOpenLimitOrder",
+        args: [
+          params.pairIndex,
+          params.orderIndex,
+          priceUnits,
+          slippageUnits,
+          tpUnits,
+          slUnits,
+        ],
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
@@ -801,17 +920,17 @@ export class TraderClient extends EventEmitter {
       // Note: Event parsing simplified - events will be emitted from contract
       const event = receipt.logs[0]; // First log typically contains the event
 
-      this.emit('limitOrderUpdated', {
+      this.emit("limitOrderUpdated", {
         pairIndex: params.pairIndex,
         orderIndex: params.orderIndex,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -823,7 +942,9 @@ export class TraderClient extends EventEmitter {
    * @deprecated Use getPairIndexFromAPI() instead for accurate pair indices
    */
   public getPairIndex(pairName: string): number {
-    console.warn('[DEPRECATED] getPairIndex() uses hardcoded pair mappings. Use getPairIndexFromAPI() for accurate indices.');
+    console.warn(
+      "[DEPRECATED] getPairIndex() uses hardcoded pair mappings. Use getPairIndexFromAPI() for accurate indices."
+    );
     return getPairIndex(pairName);
   }
 
@@ -832,7 +953,9 @@ export class TraderClient extends EventEmitter {
    * @deprecated Use getPairNameFromAPI() instead for accurate pair names
    */
   public getPairName(index: number): string {
-    console.warn('[DEPRECATED] getPairName() uses hardcoded pair mappings. Use getPairNameFromAPI() for accurate names.');
+    console.warn(
+      "[DEPRECATED] getPairName() uses hardcoded pair mappings. Use getPairNameFromAPI() for accurate names."
+    );
     return getPairName(index);
   }
 
@@ -841,7 +964,9 @@ export class TraderClient extends EventEmitter {
    * @deprecated Use getAllPairsFromAPI() instead for all 89+ pairs
    */
   public getAllPairs(): string[] {
-    console.warn('[DEPRECATED] getAllPairs() returns hardcoded pairs. Use getAllPairsFromAPI() for all 89+ pairs.');
+    console.warn(
+      "[DEPRECATED] getAllPairs() returns hardcoded pairs. Use getAllPairsFromAPI() for all 89+ pairs."
+    );
     return getAllPairs();
   }
 
@@ -849,8 +974,12 @@ export class TraderClient extends EventEmitter {
    * Gets pairs by category (DEPRECATED - uses hardcoded mapping)
    * @deprecated Use Socket API methods via AvantisSDK.getMarketsByType() instead
    */
-  public getPairsByCategory(category: 'crypto' | 'forex' | 'commodity' | 'index'): string[] {
-    console.warn('[DEPRECATED] getPairsByCategory() uses hardcoded pairs. Use AvantisSDK.getMarketsByType() instead.');
+  public getPairsByCategory(
+    category: "crypto" | "forex" | "commodity" | "index"
+  ): string[] {
+    console.warn(
+      "[DEPRECATED] getPairsByCategory() uses hardcoded pairs. Use AvantisSDK.getMarketsByType() instead."
+    );
     return getPairsByCategory(category);
   }
 
@@ -861,7 +990,9 @@ export class TraderClient extends EventEmitter {
    */
   public async getPairIndexFromAPI(pairName: string): Promise<number> {
     const markets = await this.socketAPI.getAllMarkets();
-    const market = markets.find(m => m.name.toUpperCase() === pairName.toUpperCase());
+    const market = markets.find(
+      (m) => m.name.toUpperCase() === pairName.toUpperCase()
+    );
     if (!market) {
       throw new TradingError(
         ErrorCode.INVALID_PAIR,
@@ -880,12 +1011,15 @@ export class TraderClient extends EventEmitter {
    */
   public async getMarketConfig(pairName: string): Promise<any> {
     // Check cache freshness
-    if (!this.marketConfigCache || Date.now() - this.marketCacheTimestamp > this.MARKET_CACHE_TTL_MS) {
+    if (
+      !this.marketConfigCache ||
+      Date.now() - this.marketCacheTimestamp > this.MARKET_CACHE_TTL_MS
+    ) {
       // Refresh cache from Socket API
       const markets = await this.socketAPI.getAllMarkets();
       this.marketConfigCache = new Map();
 
-      markets.forEach(market => {
+      markets.forEach((market) => {
         this.marketConfigCache!.set(market.name.toUpperCase(), {
           pairIndex: market.pairIndex,
           name: market.name,
@@ -894,20 +1028,25 @@ export class TraderClient extends EventEmitter {
           minLeverage: market.minLeverage,
           maxLeverage: market.maxLeverage,
           spreadPercent: market.spreadPercent,
-          pythFeedId: market.pythFeedId
+          pythFeedId: market.pythFeedId,
         });
       });
 
       this.marketCacheTimestamp = Date.now();
-      console.log(`Refreshed market config cache: ${this.marketConfigCache.size} markets available`);
+      console.log(
+        `Refreshed market config cache: ${this.marketConfigCache.size} markets available`
+      );
     }
 
     const config = this.marketConfigCache.get(pairName.toUpperCase());
     if (!config) {
       // Fallback to hardcoded TRADING_PAIRS for backward compatibility
-      const hardcodedConfig = TRADING_PAIRS[pairName as keyof typeof TRADING_PAIRS];
+      const hardcodedConfig =
+        TRADING_PAIRS[pairName as keyof typeof TRADING_PAIRS];
       if (hardcodedConfig) {
-        console.warn(`Using hardcoded config for ${pairName} - Socket API data not available`);
+        console.warn(
+          `Using hardcoded config for ${pairName} - Socket API data not available`
+        );
         return {
           pairIndex: getPairIndex(pairName),
           name: pairName,
@@ -916,7 +1055,7 @@ export class TraderClient extends EventEmitter {
           minLeverage: 1,
           maxLeverage: hardcodedConfig.maxLeverage,
           spreadPercent: 0,
-          pythFeedId: ''
+          pythFeedId: "",
         };
       }
 
@@ -953,7 +1092,7 @@ export class TraderClient extends EventEmitter {
    */
   public async getAllPairsFromAPI(): Promise<string[]> {
     const markets = await this.socketAPI.getAllMarkets();
-    return markets.map(m => m.name);
+    return markets.map((m) => m.name);
   }
 
   /**
@@ -965,17 +1104,18 @@ export class TraderClient extends EventEmitter {
     } else {
       this.feeManager.updateConfig(config);
     }
-    
+
     // Initialize multicall bundler if not already done
     if (!this.multicallBundler) {
       // Use the multicall address from the config or default
-      const multicallAddress = this.network.chainId === 8453 
-        ? '0x7A829c5C97A2Bf8BeFB4b01d96A282E4763848d8' // Base mainnet
-        : undefined; // Will use default from constants
+      const multicallAddress =
+        this.network.chainId === 8453
+          ? "0x7A829c5C97A2Bf8BeFB4b01d96A282E4763848d8" // Base mainnet
+          : undefined; // Will use default from constants
       this.multicallBundler = new MulticallBundler(multicallAddress);
     }
-    
-    this.emit('platformFeeConfigSet', config);
+
+    this.emit("platformFeeConfigSet", config);
   }
 
   /**
@@ -995,39 +1135,45 @@ export class TraderClient extends EventEmitter {
     if (!this.feeManager) {
       return null;
     }
-    
+
     return this.feeManager.calculateFeeBreakdown(tradeSize, params);
   }
 
   /**
    * Opens a position with platform fees (bundled transaction)
    */
-  public async openPositionWithFees(params: OpenPositionParams): Promise<TradeResponse> {
+  public async openPositionWithFees(
+    params: OpenPositionParams
+  ): Promise<TradeResponse> {
     try {
       // Check if fees are enabled
-      if (!this.feeManager || !this.feeManager.isEnabled() || !params.platformFee?.enabled) {
+      if (
+        !this.feeManager ||
+        !this.feeManager.isEnabled() ||
+        !params.platformFee?.enabled
+      ) {
         // Fall back to regular openPosition if fees not enabled
         return await this.openPosition(params);
       }
-      
+
       if (!this.multicallBundler) {
         throw new TradingError(
           ErrorCode.NOT_IMPLEMENTED,
-          'Multicall bundler not initialized'
+          "Multicall bundler not initialized"
         );
       }
-      
+
       // Validate parameters
       const validated = validate(OpenPositionParamsSchema, params);
-      
+
       // Check contracts
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       // Get market configuration from Socket API (dynamic, always up-to-date)
       const marketConfig = await this.getMarketConfig(params.pair);
       const pairIndex = marketConfig.pairIndex;
@@ -1036,17 +1182,22 @@ export class TraderClient extends EventEmitter {
       const size = validatePositionSize(
         params.size,
         marketConfig.minPositionSizeUSDC,
-        marketConfig.maxPositionSizeUSDC.gt(0) ? marketConfig.maxPositionSizeUSDC : new Decimal(1000000)
+        marketConfig.maxPositionSizeUSDC.gt(0)
+          ? marketConfig.maxPositionSizeUSDC
+          : new Decimal(1000000)
       );
       validateLeverage(params.leverage, marketConfig.maxLeverage);
-      
+
       // Calculate collateral
       const collateral = size.div(params.leverage);
-      
+
       // Calculate platform fees
-      const feeBreakdown = this.feeManager.calculateFeeBreakdown(size, params.platformFee);
+      const feeBreakdown = this.feeManager.calculateFeeBreakdown(
+        size,
+        params.platformFee
+      );
       const totalRequired = collateral.plus(feeBreakdown.totalFee);
-      
+
       // Check balances
       const balance = await this.getUSDCBalance();
       if (balance.lt(totalRequired)) {
@@ -1056,20 +1207,29 @@ export class TraderClient extends EventEmitter {
           params.pair
         );
       }
-      
+
       // Build trade struct
       const address = await this.getAddress();
       const isLong = params.side === PositionSide.LONG;
       const orderType = params.orderType || OrderType.MARKET;
       let orderTypeValue: number;
       switch (orderType) {
-        case OrderType.MARKET: orderTypeValue = OrderTypeValue.MARKET; break;
-        case OrderType.LIMIT: orderTypeValue = OrderTypeValue.LIMIT; break;
-        case OrderType.STOP: orderTypeValue = OrderTypeValue.STOP; break;
-        case OrderType.STOP_LIMIT: orderTypeValue = OrderTypeValue.STOP_LIMIT; break;
-        default: orderTypeValue = OrderTypeValue.MARKET;
+        case OrderType.MARKET:
+          orderTypeValue = OrderTypeValue.MARKET;
+          break;
+        case OrderType.LIMIT:
+          orderTypeValue = OrderTypeValue.LIMIT;
+          break;
+        case OrderType.STOP:
+          orderTypeValue = OrderTypeValue.STOP;
+          break;
+        case OrderType.STOP_LIMIT:
+          orderTypeValue = OrderTypeValue.STOP_LIMIT;
+          break;
+        default:
+          orderTypeValue = OrderTypeValue.MARKET;
       }
-      
+
       const tradeStruct = {
         trader: address,
         pairIndex: pairIndex,
@@ -1081,11 +1241,14 @@ export class TraderClient extends EventEmitter {
         leverage: toLeverageUnits(params.leverage),
         tp: params.takeProfit ? toUSDCUnits(params.takeProfit) : 0,
         sl: params.stopLoss ? toUSDCUnits(params.stopLoss) : 0,
-        timestamp: 0
+        timestamp: 0,
       };
-      
-      const slippageUnits = parseUnits(((params.slippage || 0.5) / 100).toString(), 10);
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+
+      const slippageUnits = parseUnits(
+        ((params.slippage || 0.5) / 100).toString(),
+        10
+      );
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
 
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
@@ -1096,11 +1259,13 @@ export class TraderClient extends EventEmitter {
         referralAddress: params.platformFee.referralAddress,
         totalAmount: toUSDCUnits(totalRequired),
         platformFeeAmount: toUSDCUnits(feeBreakdown.platformReceives),
-        referralFeeAmount: params.platformFee.referralAddress ? toUSDCUnits(feeBreakdown.referralFee) : undefined,
+        referralFeeAmount: params.platformFee.referralAddress
+          ? toUSDCUnits(feeBreakdown.referralFee)
+          : undefined,
         tradeStruct,
         orderTypeValue,
         slippageUnits,
-        executionFee
+        executionFee,
       });
 
       // Execute bundled transaction
@@ -1110,22 +1275,22 @@ export class TraderClient extends EventEmitter {
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
         value: bundled.value,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('positionOpenedWithFees', {
+      this.emit("positionOpenedWithFees", {
         transactionHash: receipt.transactionHash,
         feeBreakdown,
-        bundledOperations: bundled.description
+        bundledOperations: bundled.description,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -1135,52 +1300,61 @@ export class TraderClient extends EventEmitter {
   /**
    * Closes a position with platform fees (bundled transaction)
    */
-  public async closePositionWithFees(params: ClosePositionParams): Promise<TradeResponse> {
+  public async closePositionWithFees(
+    params: ClosePositionParams
+  ): Promise<TradeResponse> {
     try {
       // Check if fees are enabled
-      if (!this.feeManager || !this.feeManager.isEnabled() || !params.platformFee?.enabled) {
+      if (
+        !this.feeManager ||
+        !this.feeManager.isEnabled() ||
+        !params.platformFee?.enabled
+      ) {
         // Fall back to regular closePosition if fees not enabled
         return await this.closePosition(params);
       }
-      
+
       if (!this.multicallBundler) {
         throw new TradingError(
           ErrorCode.NOT_IMPLEMENTED,
-          'Multicall bundler not initialized'
+          "Multicall bundler not initialized"
         );
       }
-      
+
       // Validate parameters
       const validated = validate(ClosePositionParamsSchema, params);
-      
+
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
-      
+
       // Parse position ID
-      const [pairIndexStr, positionIndexStr] = params.positionId.split('-');
+      const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
       if (!pairIndexStr || !positionIndexStr) {
         throw new ValidationError(
           'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
-          'positionId'
+          "positionId"
         );
       }
-      
+
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
       const closeAmount = params.size ? toUSDCUnits(params.size) : BigInt(0);
-      
+
       // Calculate platform fees on the closing size
       // Note: This is simplified - in reality you might want to calculate based on PnL or returned collateral
       const closeSize = params.size || new Decimal(100); // Default placeholder
-      const feeBreakdown = this.feeManager.calculateFeeBreakdown(closeSize, params.platformFee);
-      
+      const feeBreakdown = this.feeManager.calculateFeeBreakdown(
+        closeSize,
+        params.platformFee
+      );
+
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
 
       const bundled = this.multicallBundler.bundleCloseWithFees({
         usdcAddress: this.network.contracts.usdc,
@@ -1188,11 +1362,13 @@ export class TraderClient extends EventEmitter {
         platformWallet: feeConfig.platformWallet,
         referralAddress: params.platformFee.referralAddress,
         platformFeeAmount: toUSDCUnits(feeBreakdown.platformReceives),
-        referralFeeAmount: params.platformFee.referralAddress ? toUSDCUnits(feeBreakdown.referralFee) : undefined,
+        referralFeeAmount: params.platformFee.referralAddress
+          ? toUSDCUnits(feeBreakdown.referralFee)
+          : undefined,
         pairIndex,
         positionIndex,
         closeAmount,
-        executionFee
+        executionFee,
       });
 
       // Execute bundled transaction
@@ -1202,23 +1378,23 @@ export class TraderClient extends EventEmitter {
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
         value: bundled.value,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('positionClosedWithFees', {
+      this.emit("positionClosedWithFees", {
         positionId: params.positionId,
         transactionHash: receipt.transactionHash,
         feeBreakdown,
-        bundledOperations: bundled.description
+        bundledOperations: bundled.description,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -1228,12 +1404,14 @@ export class TraderClient extends EventEmitter {
   /**
    * Updates margin for an open position (add or remove collateral)
    */
-  public async updateMargin(params: UpdateMarginParams): Promise<TradeResponse> {
+  public async updateMargin(
+    params: UpdateMarginParams
+  ): Promise<TradeResponse> {
     try {
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
 
@@ -1250,45 +1428,48 @@ export class TraderClient extends EventEmitter {
         try {
           priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
         } catch (error) {
-          console.warn(`Failed to fetch Pyth price data for ${pairName}:`, error);
+          console.warn(
+            `Failed to fetch Pyth price data for ${pairName}:`,
+            error
+          );
         }
       }
 
       // Execute updateMargin transaction
       // Note: This requires an execution fee
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'updateMargin',
+        functionName: "updateMargin",
         args: [
           params.pairIndex,
           params.positionIndex,
           params.type, // 0 = ADD, 1 = REMOVE
           amountUnits,
-          priceUpdateData
+          priceUpdateData,
         ],
         value: executionFee,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('marginUpdated', {
+      this.emit("marginUpdated", {
         pairIndex: params.pairIndex,
         positionIndex: params.positionIndex,
         type: params.type,
         amount: params.amount,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -1298,19 +1479,21 @@ export class TraderClient extends EventEmitter {
   /**
    * Executes a limit order (for keepers/bots)
    */
-  public async executeLimitOrder(params: ExecuteLimitOrderParams): Promise<TradeResponse> {
+  public async executeLimitOrder(
+    params: ExecuteLimitOrderParams
+  ): Promise<TradeResponse> {
     try {
       if (!this.tradingContract) {
         throw new TradingError(
           ErrorCode.CONTRACT_NOT_FOUND,
-          'Trading contract not deployed on this network'
+          "Trading contract not deployed on this network"
         );
       }
 
       const priceUpdateData = params.priceUpdateData || [];
 
       // Calculate execution fee (may need to cover Pyth fee)
-      const executionFee = parseEther('0.00035'); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
 
       // Execute the limit order
       const walletClient = this.blockchain.getSigner();
@@ -1318,33 +1501,33 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).writeContract({
         address: this.network.contracts.trading as `0x${string}`,
         abi: TradingContractABI,
-        functionName: 'executeLimitOrder',
+        functionName: "executeLimitOrder",
         args: [
           params.orderType, // LimitOrderType enum
           params.trader as `0x${string}`,
           params.pairIndex,
           params.index,
-          priceUpdateData
+          priceUpdateData,
         ],
         value: executionFee,
-        account
+        account,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
-      this.emit('limitOrderExecuted', {
+      this.emit("limitOrderExecuted", {
         orderType: params.orderType,
         trader: params.trader,
         pairIndex: params.pairIndex,
         index: params.index,
-        transactionHash: receipt.transactionHash
+        transactionHash: receipt.transactionHash,
       });
 
       return {
-        success: receipt.status === 'success',
+        success: receipt.status === "success",
         transactionHash: receipt.transactionHash,
         gasUsed: receipt.gasUsed,
-        effectiveGasPrice: receipt.effectiveGasPrice
+        effectiveGasPrice: receipt.effectiveGasPrice,
       };
     } catch (error) {
       throw handleError(error);
@@ -1354,22 +1537,27 @@ export class TraderClient extends EventEmitter {
   /**
    * Gets all pending limit orders for the current account
    */
-  public async getPendingLimitOrders(address?: string): Promise<PendingLimitOrder[]> {
+  public async getPendingLimitOrders(
+    address?: string
+  ): Promise<PendingLimitOrder[]> {
     try {
-      const addr = address || await this.getAddress();
+      const addr = address || (await this.getAddress());
 
       // Use StorageClient to fetch pending orders
       const publicClient = this.blockchain.getProvider();
       const tradingStorageAddress = this.network.contracts.tradingStorage;
 
-      if (!tradingStorageAddress || tradingStorageAddress === '0x0000000000000000000000000000000000000000') {
+      if (
+        !tradingStorageAddress ||
+        tradingStorageAddress === "0x0000000000000000000000000000000000000000"
+      ) {
         return [];
       }
 
       const tradingStorageContract: any = getContract({
         address: tradingStorageAddress as `0x${string}`,
         abi: TradingStorageContractABI,
-        client: publicClient as any
+        client: publicClient as any,
       });
 
       // Get pending orders from storage
@@ -1385,10 +1573,17 @@ export class TraderClient extends EventEmitter {
         // Check up to 3 potential order indices per pair
         for (let i = 0; i < 3; i++) {
           try {
-            const order = await tradingStorageContract.read.openLimitOrders([addr as `0x${string}`, pairIndex, i]);
+            const order = await tradingStorageContract.read.openLimitOrders([
+              addr as `0x${string}`,
+              pairIndex,
+              i,
+            ]);
 
             // Check if order exists
-            if (order && order.trader !== '0x0000000000000000000000000000000000000000') {
+            if (
+              order &&
+              order.trader !== "0x0000000000000000000000000000000000000000"
+            ) {
               orders.push({
                 id: `${pairIndex}-${i}`,
                 trader: order.trader,
@@ -1397,11 +1592,19 @@ export class TraderClient extends EventEmitter {
                 positionSize: new Decimal(formatUSDC(order.positionSizeUSDC)),
                 buy: order.buy,
                 leverage: Number(order.leverage),
-                openPrice: new Decimal(formatUSDC(order.minPrice || order.maxPrice)),
-                tp: order.tp && Number(order.tp) > 0 ? new Decimal(formatUSDC(order.tp)) : undefined,
-                sl: order.sl && Number(order.sl) > 0 ? new Decimal(formatUSDC(order.sl)) : undefined,
+                openPrice: new Decimal(
+                  formatUSDC(order.minPrice || order.maxPrice)
+                ),
+                tp:
+                  order.tp && Number(order.tp) > 0
+                    ? new Decimal(formatUSDC(order.tp))
+                    : undefined,
+                sl:
+                  order.sl && Number(order.sl) > 0
+                    ? new Decimal(formatUSDC(order.sl))
+                    : undefined,
                 timestamp: new Date(),
-                orderType: OrderType.LIMIT
+                orderType: OrderType.LIMIT,
               });
             }
           } catch {
