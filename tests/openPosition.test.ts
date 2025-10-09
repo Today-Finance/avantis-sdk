@@ -179,6 +179,52 @@ describe('OpenPosition Functionality Tests', () => {
         })
       ).rejects.toThrow();
     });
+
+    it('should pass validation with $20 position size (developer scenario)', async () => {
+      // This test documents the fix for the BELOW_MIN_POS error
+      // Developer was getting error with size=20, leverage=1 on ETH/USD
+      // After implementing dynamic validation from Socket API, this now works
+
+      // This should NOT throw during validation (the actual transaction would
+      // fail due to insufficient balance in test, but validation should pass)
+      try {
+        await trader.openPosition({
+          pair: 'ETH/USD',
+          side: PositionSide.LONG,
+          size: 20,  // $20 USDC - previously failed with BELOW_MIN_POS
+          leverage: 1,
+          slippage: 1.0
+        });
+
+        // If we get here without throwing a validation error, test passes
+        // (It will throw insufficient balance error in test env, which is expected)
+        expect(true).toBe(true);
+      } catch (error: any) {
+        // The error should be about insufficient balance/allowance, NOT about position size
+        // First verify it's NOT a validation error about minimum position size
+        expect(error.message).not.toContain('Position size must be at least');
+        expect(error.message).not.toContain('BELOW_MIN_POS');
+
+        // These are acceptable errors in test environment:
+        const acceptableErrors = [
+          'Insufficient USDC balance',
+          'Insufficient USDC allowance',
+          'rate limit',
+          'Trading contract not deployed'  // In test env without contract
+        ];
+
+        const isAcceptableError = acceptableErrors.some(msg =>
+          error.message?.includes(msg)
+        );
+
+        // If not an acceptable error, log it for debugging
+        if (!isAcceptableError) {
+          console.log('Unexpected error:', error.message);
+        }
+
+        expect(isAcceptableError).toBe(true);
+      }
+    });
   });
 
   describe('Contract Addresses', () => {

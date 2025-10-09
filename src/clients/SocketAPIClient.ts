@@ -85,7 +85,7 @@ export class SocketAPIClient {
       // Convert all pairs to MarketData
       for (const [index, pairInfo] of Object.entries(pairInfos)) {
         if (pairInfo && pairInfo.from && pairInfo.to) {
-          const market = pairInfo;
+          const market = this.convertToMarketData(pairInfo);
           markets.push(market);
           this.cache.set(parseInt(index), market);
         }
