@@ -7,8 +7,8 @@ import type {
   Hash,
   TransactionReceipt as ViemTransactionReceipt,
   TransactionRequest as ViemTransactionRequest,
-  Log
-} from 'viem';
+  Log,
+} from "viem";
 
 export type ChainId = 8453 | 84531; // Base mainnet and testnet
 
@@ -42,11 +42,12 @@ export interface NetworkConfig {
 }
 
 export interface SignerConfig {
-  type: 'privateKey' | 'mnemonic' | 'jsonRpc' | 'injected';
+  type: "privateKey" | "mnemonic" | "jsonRpc" | "injected" | "viemClient";
   privateKey?: string;
   mnemonic?: string;
   path?: string;
   provider?: any; // For injected providers (MetaMask, etc.)
+  client?: WalletClient; // For viem WalletClient (like kernel client)
 }
 
 export interface TransactionConfig {
@@ -68,7 +69,7 @@ export interface TransactionResult {
   value: bigint;
   gasUsed: bigint;
   effectiveGasPrice: bigint;
-  status: 'success' | 'failed' | 'pending';
+  status: "success" | "failed" | "pending";
   logs?: any[];
 }
 
