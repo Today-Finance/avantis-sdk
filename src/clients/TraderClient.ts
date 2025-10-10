@@ -327,6 +327,15 @@ export class TraderClient extends EventEmitter {
         case OrderType.MARKET:
           orderTypeValue = OrderTypeValue.MARKET;
           break;
+        case OrderType.STOP_LIMIT:
+          orderTypeValue = OrderTypeValue.STOP_LIMIT;
+          if (!params.openPrice) {
+            throw new ValidationError(
+              "Open price is required for stop-limit orders",
+              "openPrice"
+            );
+          }
+          break;
         case OrderType.LIMIT:
           orderTypeValue = OrderTypeValue.LIMIT;
           if (!params.openPrice) {
@@ -336,23 +345,8 @@ export class TraderClient extends EventEmitter {
             );
           }
           break;
-        case OrderType.STOP:
-          orderTypeValue = OrderTypeValue.STOP;
-          if (!params.openPrice) {
-            throw new ValidationError(
-              "Stop price is required for stop orders",
-              "openPrice"
-            );
-          }
-          break;
-        case OrderType.STOP_LIMIT:
-          orderTypeValue = OrderTypeValue.STOP_LIMIT;
-          if (!params.openPrice) {
-            throw new ValidationError(
-              "Open price is required for stop-limit orders",
-              "openPrice"
-            );
-          }
+        case OrderType.MARKET_ZERO_FEE:
+          orderTypeValue = OrderTypeValue.MARKET_ZERO_FEE;
           break;
         default:
           orderTypeValue = OrderTypeValue.MARKET;
@@ -431,18 +425,25 @@ export class TraderClient extends EventEmitter {
         );
       }
 
+      // For MARKET_ZERO_FEE orders, positionSizeUSDC should contain collateral amount (not position size)
+      // For other order types, it contains the full position size
+      const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
+      const positionSizeValue = isZeroFeeOrder
+        ? collateralUnits
+        : positionSizeUnits;
+
       const tradeStruct = {
         trader: address,
         pairIndex: pairIndex,
         index: 0, // This will be assigned by the contract
-        initialPosToken: 0, // Always 0 for new positions (not collateral)
-        positionSizeUSDC: Number(positionSizeUnits),
+        initialPosToken: 0, // Always 0 for new positions
+        positionSizeUSDC: Number(positionSizeValue),
         openPrice: Number(openPriceUnits),
         buy: isLong,
         leverage: Number(toLeverageUnits(params.leverage)),
         tp: takeProfitUnits,
         sl: stopLossUnits,
-        timestamp: Math.floor(Date.now() / 1000), // Current Unix timestamp
+        timestamp: 0, // Must be 0 for new positions (contract will set timestamp)
       };
 
       console.log("tradeStruct === ", tradeStruct);
@@ -464,7 +465,10 @@ export class TraderClient extends EventEmitter {
 
       // Parse events based on order type
       let eventName: string;
-      if (orderType === OrderType.MARKET) {
+      const isMarketOrder =
+        orderType === OrderType.MARKET ||
+        orderType === OrderType.MARKET_ZERO_FEE;
+      if (isMarketOrder) {
         eventName = "MarketOrderInitiated";
       } else {
         eventName = "LimitOrderInitiated";
@@ -474,20 +478,17 @@ export class TraderClient extends EventEmitter {
       const event = receipt.logs[0]; // First log typically contains the event
 
       let position: Position | undefined;
-      if (event && orderType === OrderType.MARKET) {
+      if (event && isMarketOrder) {
         // For market orders, try to get the position immediately
         // The position might not be available immediately for market orders
         // as they go through oracle execution
       }
 
-      this.emit(
-        orderType === OrderType.MARKET ? "positionOpened" : "limitOrderPlaced",
-        {
-          position,
-          transactionHash: receipt.transactionHash,
-          orderType,
-        }
-      );
+      this.emit(isMarketOrder ? "positionOpened" : "limitOrderPlaced", {
+        position,
+        transactionHash: receipt.transactionHash,
+        orderType,
+      });
 
       return {
         success: receipt.status === "success",
@@ -532,7 +533,12 @@ export class TraderClient extends EventEmitter {
       const positionIndex = parseInt(positionIndexStr);
 
       // Determine close amount (0 means close full position)
-      const closeAmount = params.size ? toUSDCUnits(params.size) : 0;
+      // collateralAmount takes priority over size for clarity
+      // Both represent the amount of COLLATERAL to close (not position size)
+      const collateralToClose = params.collateralAmount || params.size;
+      const closeAmount = collateralToClose
+        ? toUSDCUnits(collateralToClose)
+        : BigInt(0);
 
       // Execute closeTradeMarket with execution fee
       const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
@@ -1217,14 +1223,14 @@ export class TraderClient extends EventEmitter {
         case OrderType.MARKET:
           orderTypeValue = OrderTypeValue.MARKET;
           break;
+        case OrderType.STOP_LIMIT:
+          orderTypeValue = OrderTypeValue.STOP_LIMIT;
+          break;
         case OrderType.LIMIT:
           orderTypeValue = OrderTypeValue.LIMIT;
           break;
-        case OrderType.STOP:
-          orderTypeValue = OrderTypeValue.STOP;
-          break;
-        case OrderType.STOP_LIMIT:
-          orderTypeValue = OrderTypeValue.STOP_LIMIT;
+        case OrderType.MARKET_ZERO_FEE:
+          orderTypeValue = OrderTypeValue.MARKET_ZERO_FEE;
           break;
         default:
           orderTypeValue = OrderTypeValue.MARKET;
@@ -1342,11 +1348,16 @@ export class TraderClient extends EventEmitter {
 
       const pairIndex = parseInt(pairIndexStr);
       const positionIndex = parseInt(positionIndexStr);
-      const closeAmount = params.size ? toUSDCUnits(params.size) : BigInt(0);
+
+      // Determine close amount (collateralAmount takes priority over size)
+      const collateralToClose = params.collateralAmount || params.size;
+      const closeAmount = collateralToClose
+        ? toUSDCUnits(collateralToClose)
+        : BigInt(0);
 
       // Calculate platform fees on the closing size
       // Note: This is simplified - in reality you might want to calculate based on PnL or returned collateral
-      const closeSize = params.size || new Decimal(100); // Default placeholder
+      const closeSize = collateralToClose || new Decimal(100); // Default placeholder
       const feeBreakdown = this.feeManager.calculateFeeBreakdown(
         closeSize,
         params.platformFee

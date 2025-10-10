@@ -1,31 +1,31 @@
-import Decimal from 'decimal.js';
-import type { PlatformFeeParams } from './platform-fees';
+import Decimal from "decimal.js";
+import type { PlatformFeeParams } from "./platform-fees";
 
 export enum PositionSide {
-  LONG = 'long',
-  SHORT = 'short'
+  LONG = "long",
+  SHORT = "short",
 }
 
 export enum OrderType {
-  MARKET = 'market',
-  LIMIT = 'limit',
-  STOP = 'stop',
-  STOP_LIMIT = 'stop_limit'
+  MARKET = "market",
+  STOP_LIMIT = "stop_limit",
+  LIMIT = "limit",
+  MARKET_ZERO_FEE = "market_zero_fee",
 }
 
-// Numeric values for contract interaction
+// Numeric values for contract interaction (matches Avantis Python SDK and smart contract)
 export enum OrderTypeValue {
   MARKET = 0,
-  LIMIT = 1,
-  STOP = 2,
-  STOP_LIMIT = 3
+  STOP_LIMIT = 1,
+  LIMIT = 2,
+  MARKET_ZERO_FEE = 3,
 }
 
 export enum PositionStatus {
-  OPEN = 'open',
-  CLOSED = 'closed',
-  LIQUIDATED = 'liquidated',
-  PENDING = 'pending'
+  OPEN = "open",
+  CLOSED = "closed",
+  LIQUIDATED = "liquidated",
+  PENDING = "pending",
 }
 
 export interface TradingPair {
@@ -39,7 +39,7 @@ export interface TradingPair {
   maxLeverage: number;
   decimals: number;
   isActive: boolean;
-  category: 'crypto' | 'forex' | 'commodity' | 'index';
+  category: "crypto" | "forex" | "commodity" | "index";
 }
 
 export interface OpenPositionParams {
@@ -47,28 +47,29 @@ export interface OpenPositionParams {
   side: PositionSide;
   size: Decimal | number | string;
   leverage: number;
-  orderType?: OrderType;  // Defaults to MARKET if not specified
-  openPrice?: Decimal | number | string;  // Required for LIMIT orders
+  orderType?: OrderType; // Defaults to MARKET if not specified
+  openPrice?: Decimal | number | string; // Required for LIMIT orders
   stopLoss?: Decimal | number | string;
   takeProfit?: Decimal | number | string;
   slippage?: number;
   referrer?: string;
-  platformFee?: PlatformFeeParams;  // Platform fee configuration
+  platformFee?: PlatformFeeParams; // Platform fee configuration
 }
 
 export interface ClosePositionParams {
   positionId: string;
-  size?: Decimal | number | string;
+  size?: Decimal | number | string; // DEPRECATED: Use collateralAmount instead
+  collateralAmount?: Decimal | number | string; // Amount of collateral to close (omit to close full position)
   slippage?: number;
-  platformFee?: PlatformFeeParams;  // Platform fee configuration
+  platformFee?: PlatformFeeParams; // Platform fee configuration
 }
 
 export interface UpdatePositionParams {
   positionId: string;
   stopLoss?: Decimal | number | string | null;
   takeProfit?: Decimal | number | string | null;
-  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
-  priceUpdateData?: string[];  // Manually provided Pyth price update data
+  autofetchPrices?: boolean; // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[]; // Manually provided Pyth price update data
 }
 
 export interface CancelLimitOrderParams {
@@ -134,9 +135,9 @@ export interface TradeResponse {
 
 export interface PendingTrade {
   id: string;
-  type: 'open' | 'close' | 'update';
+  type: "open" | "close" | "update";
   params: OpenPositionParams | ClosePositionParams | UpdatePositionParams;
-  status: 'pending' | 'submitted' | 'confirmed' | 'failed';
+  status: "pending" | "submitted" | "confirmed" | "failed";
   transactionHash?: string;
   createdAt: Date;
   error?: string;
@@ -179,7 +180,7 @@ export interface MarketStats {
 // Margin update types
 export enum MarginUpdateType {
   ADD = 0,
-  REMOVE = 1
+  REMOVE = 1,
 }
 
 export interface UpdateMarginParams {
@@ -187,16 +188,16 @@ export interface UpdateMarginParams {
   positionIndex: number;
   type: MarginUpdateType;
   amount: Decimal | number | string;
-  autofetchPrices?: boolean;  // Auto-fetch Pyth price data (default: true)
-  priceUpdateData?: string[];  // Manually provided Pyth price update data
+  autofetchPrices?: boolean; // Auto-fetch Pyth price data (default: true)
+  priceUpdateData?: string[]; // Manually provided Pyth price update data
 }
 
 // Limit order execution types
 export enum LimitOrderType {
-  TP = 0,    // Take Profit
-  SL = 1,    // Stop Loss
-  LIQ = 2,   // Liquidation
-  OPEN = 3   // Open Limit Order
+  TP = 0, // Take Profit
+  SL = 1, // Stop Loss
+  LIQ = 2, // Liquidation
+  OPEN = 3, // Open Limit Order
 }
 
 export interface ExecuteLimitOrderParams {
