@@ -59,6 +59,7 @@
     "url": "git+https://github.com/Today-Finance/avantis-sdk.git"
   },
   "dependencies": {
+    "@privy-io/server-auth": "^1.32.5",
     "axios": "^1.12.2",
     "decimal.js": "^10.6.0",
     "eventemitter3": "^5.0.1",

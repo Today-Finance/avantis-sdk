@@ -125,6 +125,7 @@ export interface Position {
 }
 
 export interface TradeResponse {
+  receipt?: any;
   success: boolean;
   transactionHash: string;
   position?: Position;

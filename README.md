@@ -25,6 +25,7 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 - ⚡ **Gas Optimized**: Multicall3 transaction bundling for 30-40% gas savings
 - 🛡️ **Production Ready**: Comprehensive error handling and recovery
 - 🔗 **Viem-Powered**: Built with [viem](https://viem.sh) for modern blockchain interactions and account abstraction support
+- 💸 **Gasless Transactions**: Full support for ZeroDev paymaster integration - trade without ETH for gas!
 
 ## 📦 Installation
 
@@ -41,30 +42,30 @@ pnpm add @todayapp/avantis-sdk
 ### Basic Trading
 
 ```typescript
-import { AvantisSDK, PositionSide, OrderType } from '@todayapp/avantis-sdk';
+import { AvantisSDK, PositionSide, OrderType } from "@todayapp/avantis-sdk";
 
 // Initialize SDK
-const sdk = new AvantisSDK('base'); // 'base' for mainnet, 'base-sepolia' for testnet
+const sdk = new AvantisSDK("base"); // 'base' for mainnet, 'base-sepolia' for testnet
 
 // Set up signer
 await sdk.setSigner({
-  type: 'privateKey',
-  privateKey: process.env.PRIVATE_KEY
+  type: "privateKey",
+  privateKey: process.env.PRIVATE_KEY,
 });
 
 // Open a position
 const result = await sdk.trader.openPosition({
-  pair: 'ETH/USD',
+  pair: "ETH/USD",
   side: PositionSide.LONG,
   size: 1000, // $1000 position size
   leverage: 10, // 10x leverage
   orderType: OrderType.MARKET,
   stopLoss: 2800, // Optional SL at $2800
   takeProfit: 3500, // Optional TP at $3500
-  slippage: 0.5 // 0.5% slippage tolerance
+  slippage: 0.5, // 0.5% slippage tolerance
 });
 
-console.log('Position opened:', result.transactionHash);
+console.log("Position opened:", result.transactionHash);
 ```
 
 ### With Platform Fees
@@ -72,23 +73,23 @@ console.log('Position opened:', result.transactionHash);
 ```typescript
 // Configure platform fees (for platforms/integrators)
 sdk.trader.setPlatformFeeConfig({
-  platformWallet: '0xYourPlatformWallet',
+  platformWallet: "0xYourPlatformWallet",
   baseFeePercent: 0.001, // 0.1% platform fee
   referralSplitPercent: 30, // 30% goes to referrers
-  enabled: true
+  enabled: true,
 });
 
 // Open position with fees
 const result = await sdk.trader.openPositionWithFees({
-  pair: 'BTC/USD',
+  pair: "BTC/USD",
   side: PositionSide.SHORT,
   size: 5000,
   leverage: 25,
   platformFee: {
     enabled: true,
     discountPercent: 20, // 20% fee discount for this user
-    referralAddress: '0xReferrerWallet' // Optional referrer
-  }
+    referralAddress: "0xReferrerWallet", // Optional referrer
+  },
 });
 ```
 
@@ -101,34 +102,36 @@ The SDK now **dynamically fetches all markets** from the Socket API, meaning it 
 ```typescript
 // ✅ Method 1: Dynamic price fetching (recommended - supports ALL 89+ pairs)
 // Works for ANY pair including new memecoins like TRUMP/USD, HYPE/USD, etc.
-const trumpPrice = await sdk.pyth.getLatestPrice('TRUMP/USD');
-const btcPrice = await sdk.pyth.getLatestPrice('BTC/USD');
-const nvdaPrice = await sdk.pyth.getLatestPrice('NVDA/USD');
+const trumpPrice = await sdk.pyth.getLatestPrice("TRUMP/USD");
+const btcPrice = await sdk.pyth.getLatestPrice("BTC/USD");
+const nvdaPrice = await sdk.pyth.getLatestPrice("NVDA/USD");
 
 // Convert Pyth price format to readable price
-const price = trumpPrice.expo < 0
-  ? parseFloat(trumpPrice.price) / Math.pow(10, Math.abs(trumpPrice.expo))
-  : parseFloat(trumpPrice.price) * Math.pow(10, trumpPrice.expo);
+const price =
+  trumpPrice.expo < 0
+    ? parseFloat(trumpPrice.price) / Math.pow(10, Math.abs(trumpPrice.expo))
+    : parseFloat(trumpPrice.price) * Math.pow(10, trumpPrice.expo);
 
 console.log(`TRUMP/USD: $${price}`);
 
 // ✅ Method 2: Fetch from Socket API first (for additional metadata)
 const markets = await sdk.getAllMarketsFromAPI();
-const trump = markets.find(m => m.name === 'TRUMP/USD');
+const trump = markets.find((m) => m.name === "TRUMP/USD");
 const priceData = await sdk.pyth.getLatestPriceByFeedId(trump.pythFeedId);
 
 // ✅ Method 3: Batch price fetching for multiple pairs
 const markets = await sdk.getAllMarketsFromAPI();
-const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const feedIds = markets.slice(0, 10).map((m) => m.pythFeedId);
 const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 
 // Access prices by feed ID
-markets.slice(0, 10).forEach(market => {
+markets.slice(0, 10).forEach((market) => {
   const priceData = prices.get(market.pythFeedId);
   if (priceData) {
-    const price = priceData.expo < 0
-      ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
-      : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
+    const price =
+      priceData.expo < 0
+        ? parseFloat(priceData.price) / Math.pow(10, Math.abs(priceData.expo))
+        : parseFloat(priceData.price) * Math.pow(10, priceData.expo);
     console.log(`${market.name}: $${price}`);
   }
 });
@@ -144,21 +147,21 @@ const markets = await sdk.getAllMarketsFromAPI();
 console.log(`Found ${markets.length} markets`); // 89+
 
 // Each market includes:
-markets.forEach(market => {
+markets.forEach((market) => {
   console.log({
     pairIndex: market.pairIndex,
-    name: market.name,                    // e.g., "BTC/USD"
-    maxLeverage: market.maxLeverage,      // e.g., 75
-    spreadPercent: market.spreadPercent,  // Trading spread
-    pythFeedId: market.pythFeedId,        // For price fetching
-    assetType: market.assetType           // Crypto, FX, Equity, etc.
+    name: market.name, // e.g., "BTC/USD"
+    maxLeverage: market.maxLeverage, // e.g., 75
+    spreadPercent: market.spreadPercent, // Trading spread
+    pythFeedId: market.pythFeedId, // For price fetching
+    assetType: market.assetType, // Crypto, FX, Equity, etc.
   });
 });
 
 // Filter by asset type
-const cryptos = await sdk.getMarketsByType('Crypto');    // 57 pairs
-const forex = await sdk.getMarketsByType('FX');          // 17 pairs
-const stocks = await sdk.getMarketsByType('Equity');     // 10 pairs
+const cryptos = await sdk.getMarketsByType("Crypto"); // 57 pairs
+const forex = await sdk.getMarketsByType("FX"); // 17 pairs
+const stocks = await sdk.getMarketsByType("Equity"); // 10 pairs
 
 // Get specific market
 const eth = await sdk.getMarketByIndex(0); // ETH/USD
@@ -170,6 +173,7 @@ console.log(`Long OI: $${oi.long}, Short OI: $${oi.short}`);
 ```
 
 **Why Socket API?**
+
 - ✅ **Complete**: All 89+ pairs vs only 4 from on-chain
 - ✅ **Fast**: ~50-100ms with 5-minute cache
 - ✅ **Rich Metadata**: Names, asset types, leverage, spreads
@@ -184,16 +188,17 @@ The SDK automatically fetches real-time price data from [Pyth Network](https://p
 ```typescript
 // Get prices for markets using Pyth feed IDs from Socket API
 const markets = await sdk.getAllMarketsFromAPI();
-const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const feedIds = markets.slice(0, 10).map((m) => m.pythFeedId);
 const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 
-markets.slice(0, 10).forEach(market => {
+markets.slice(0, 10).forEach((market) => {
   const priceData = prices.get(market.pythFeedId);
   if (priceData) {
     const expo = priceData.expo;
-    const price = expo < 0
-      ? parseFloat(priceData.price) / Math.pow(10, Math.abs(expo))
-      : parseFloat(priceData.price) * Math.pow(10, expo);
+    const price =
+      expo < 0
+        ? parseFloat(priceData.price) / Math.pow(10, Math.abs(expo))
+        : parseFloat(priceData.price) * Math.pow(10, expo);
     console.log(`${market.name}: $${price}`);
   }
 });
@@ -204,21 +209,21 @@ const btcPrice = await sdk.pyth.getLatestPriceByFeedId(btc.pythFeedId);
 
 // Automatic price fetching in trades (default behavior)
 const result = await sdk.trader.openPosition({
-  pair: 'BTC/USD',
+  pair: "BTC/USD",
   side: PositionSide.LONG,
   size: 1000,
-  leverage: 10
+  leverage: 10,
   // Pyth prices automatically fetched and included!
 });
 
 // Manual control over price fetching
 const result = await sdk.trader.openPosition({
-  pair: 'ETH/USD',
+  pair: "ETH/USD",
   side: PositionSide.SHORT,
   size: 500,
   leverage: 5,
   autofetchPrices: false, // Disable auto-fetch
-  priceUpdateData: customPriceData // Provide your own price data
+  priceUpdateData: customPriceData, // Provide your own price data
 });
 ```
 
@@ -236,10 +241,10 @@ Add to your app's entry point:
 
 ```javascript
 // index.js or App.tsx
-import 'react-native-get-random-values';
+import "react-native-get-random-values";
 
 // Your app code
-import App from './App';
+import App from "./App";
 ```
 
 > **Note**: The SDK now uses [viem](https://viem.sh) which has better React Native compatibility than ethers.js
@@ -255,16 +260,18 @@ The SDK supports **89+ trading pairs** across different asset classes via the So
 const markets = await sdk.getAllMarketsFromAPI();
 console.log(`Total markets: ${markets.length}`);
 
-markets.forEach(market => {
-  console.log(`${market.name}: ${market.maxLeverage}x leverage, ${market.spreadPercent}% spread`);
+markets.forEach((market) => {
+  console.log(
+    `${market.name}: ${market.maxLeverage}x leverage, ${market.spreadPercent}% spread`
+  );
 });
 
 // Filter by asset type
-const cryptoMarkets = await sdk.getMarketsByType('Crypto'); // 57 crypto pairs
-const forexMarkets = await sdk.getMarketsByType('FX');      // 17 forex pairs
-const stockMarkets = await sdk.getMarketsByType('Equity');  // 10 stock pairs
-const metalMarkets = await sdk.getMarketsByType('Metal');   // 2 metal pairs
-const commodities = await sdk.getMarketsByType('Commodities'); // 1 commodity
+const cryptoMarkets = await sdk.getMarketsByType("Crypto"); // 57 crypto pairs
+const forexMarkets = await sdk.getMarketsByType("FX"); // 17 forex pairs
+const stockMarkets = await sdk.getMarketsByType("Equity"); // 10 stock pairs
+const metalMarkets = await sdk.getMarketsByType("Metal"); // 2 metal pairs
+const commodities = await sdk.getMarketsByType("Commodities"); // 1 commodity
 
 // Get available asset types
 const assetTypes = await sdk.getAssetTypes();
@@ -275,11 +282,12 @@ const btc = await sdk.getMarketByIndex(1); // BTC/USD
 console.log(`${btc.name}: Max leverage ${btc.maxLeverage}x`);
 
 // Get markets with current Pyth prices
-const feedIds = markets.slice(0, 10).map(m => m.pythFeedId);
+const feedIds = markets.slice(0, 10).map((m) => m.pythFeedId);
 const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 ```
 
 **Market Breakdown:**
+
 - 🪙 **Crypto**: 57 pairs (ETH, BTC, SOL, BNB, ARB, DOGE, AVAX, OP, POL, TIA, SEI, SHIB, PEPE, BONK, WIF, and more)
 - 💱 **Forex**: 17 pairs (EUR/USD, GBP/USD, USD/JPY, and major currency pairs)
 - 📈 **Stocks**: 10 pairs (SPY, QQQ, NVDA, AAPL, TSLA, GOOG, AMZN, META, MSFT, COIN)
@@ -292,18 +300,18 @@ const prices = await sdk.pyth.getLatestPricesByFeedIds(feedIds);
 
 ```typescript
 // Get pair index dynamically (recommended)
-const ethIndex = await sdk.getPairIndexByName('ETH/USD'); // Returns: 0
-const btcIndex = await sdk.getPairIndexByName('BTC/USD'); // Returns: 1
+const ethIndex = await sdk.getPairIndexByName("ETH/USD"); // Returns: 0
+const btcIndex = await sdk.getPairIndexByName("BTC/USD"); // Returns: 1
 
 // Get pair name from index
 const pairName = await sdk.getPairNameByIndex(1); // Returns: "BTC/USD"
 
 // When trading, use pair names (indices are resolved automatically)
 await sdk.trader.openPosition({
-  pair: 'ETH/USD',  // ✅ Use names, not indices
+  pair: "ETH/USD", // ✅ Use names, not indices
   side: PositionSide.LONG,
   size: 1000,
-  leverage: 10
+  leverage: 10,
 });
 ```
 
@@ -315,15 +323,15 @@ const positions = await sdk.trader.getPositions();
 
 // Update stop loss and take profit
 await sdk.trader.updatePosition({
-  positionId: '0-123', // Format: "pairIndex-positionIndex"
+  positionId: "0-123", // Format: "pairIndex-positionIndex"
   stopLoss: 2900,
-  takeProfit: 3200
+  takeProfit: 3200,
 });
 
 // Close position (partial or full)
 await sdk.trader.closePosition({
-  positionId: '0-123',
-  size: 500 // Optional: close only $500 (partial close)
+  positionId: "0-123",
+  size: 500, // Optional: close only $500 (partial close)
 });
 ```
 
@@ -332,12 +340,12 @@ await sdk.trader.closePosition({
 ```typescript
 const account = await sdk.trader.getAccountInfo();
 
-console.log('Address:', account.address);
-console.log('USDC Balance:', account.usdcBalance.toFixed(2));
-console.log('Free Collateral:', account.freeCollateral.toFixed(2));
-console.log('Active Positions:', account.positions.length);
-console.log('Unrealized PnL:', account.unrealizedPnl.toFixed(2));
-console.log('Margin Level:', account.marginLevel, '%');
+console.log("Address:", account.address);
+console.log("USDC Balance:", account.usdcBalance.toFixed(2));
+console.log("Free Collateral:", account.freeCollateral.toFixed(2));
+console.log("Active Positions:", account.positions.length);
+console.log("Unrealized PnL:", account.unrealizedPnl.toFixed(2));
+console.log("Margin Level:", account.marginLevel, "%");
 ```
 
 ### Limit Orders
@@ -345,14 +353,14 @@ console.log('Margin Level:', account.marginLevel, '%');
 ```typescript
 // Place a limit order
 const limitOrder = await sdk.trader.openPosition({
-  pair: 'ETH/USD',
+  pair: "ETH/USD",
   side: PositionSide.LONG,
   size: 2000,
   leverage: 15,
   orderType: OrderType.LIMIT,
   openPrice: 2950, // Will execute when ETH reaches $2950
   stopLoss: 2800,
-  takeProfit: 3200
+  takeProfit: 3200,
 });
 
 // Update limit order
@@ -361,13 +369,13 @@ await sdk.trader.updateLimitOrder({
   orderIndex: 0,
   price: 2940, // New limit price
   takeProfit: 3250,
-  stopLoss: 2750
+  stopLoss: 2750,
 });
 
 // Cancel limit order
 await sdk.trader.cancelLimitOrder({
   pairIndex: 1, // BTC/USD (get dynamically via sdk.getPairIndexByName('BTC/USD'))
-  orderIndex: 0
+  orderIndex: 0,
 });
 ```
 
@@ -376,6 +384,7 @@ await sdk.trader.cancelLimitOrder({
 The SDK includes a comprehensive fee management system for platforms and integrators:
 
 ### Features
+
 - **Transaction Bundling**: Uses Multicall3 for gas-efficient atomic transactions
 - **Flexible Discounts**: Per-user percentage discounts (0-100%)
 - **Referral Support**: Automatic fee splitting with referrers
@@ -386,10 +395,10 @@ The SDK includes a comprehensive fee management system for platforms and integra
 ```typescript
 // Configure global platform fees
 sdk.trader.setPlatformFeeConfig({
-  platformWallet: '0xYourPlatformWallet',
+  platformWallet: "0xYourPlatformWallet",
   baseFeePercent: 0.002, // 0.2% fee
   referralSplitPercent: 40, // 40% to referrers
-  enabled: true
+  enabled: true,
 });
 
 // Calculate fees before trading
@@ -398,13 +407,13 @@ const feeBreakdown = sdk.trader.calculateFeeBreakdown(
   {
     enabled: true,
     discountPercent: 25, // VIP discount
-    referralAddress: '0xReferrer'
+    referralAddress: "0xReferrer",
   }
 );
 
-console.log('Platform receives:', feeBreakdown.platformReceives);
-console.log('Referrer receives:', feeBreakdown.referralFee);
-console.log('Total fee:', feeBreakdown.totalFee);
+console.log("Platform receives:", feeBreakdown.platformReceives);
+console.log("Referrer receives:", feeBreakdown.referralFee);
+console.log("Total fee:", feeBreakdown.totalFee);
 
 // Execute trade with fees (bundled in single transaction)
 await sdk.trader.openPositionWithFees({
@@ -412,8 +421,8 @@ await sdk.trader.openPositionWithFees({
   platformFee: {
     enabled: true,
     discountPercent: 25,
-    referralAddress: '0xReferrer'
-  }
+    referralAddress: "0xReferrer",
+  },
 });
 ```
 
@@ -422,12 +431,12 @@ await sdk.trader.openPositionWithFees({
 The SDK provides detailed error types for robust error handling:
 
 ```typescript
-import { 
+import {
   TradingError,
   ValidationError,
   NetworkError,
-  ErrorCode
-} from '@todayapp/avantis-sdk';
+  ErrorCode,
+} from "@todayapp/avantis-sdk";
 
 try {
   await sdk.trader.openPosition(params);
@@ -435,21 +444,21 @@ try {
   if (error instanceof TradingError) {
     switch (error.code) {
       case ErrorCode.INSUFFICIENT_COLLATERAL:
-        console.error('Not enough USDC balance');
+        console.error("Not enough USDC balance");
         break;
       case ErrorCode.POSITION_SIZE_TOO_SMALL:
-        console.error('Position size below minimum');
+        console.error("Position size below minimum");
         break;
       case ErrorCode.MAX_LEVERAGE_EXCEEDED:
-        console.error('Leverage too high for this pair');
+        console.error("Leverage too high for this pair");
         break;
       default:
-        console.error('Trading error:', error.message);
+        console.error("Trading error:", error.message);
     }
   } else if (error instanceof ValidationError) {
-    console.error('Invalid input:', error.field, error.message);
+    console.error("Invalid input:", error.field, error.message);
   } else if (error instanceof NetworkError) {
-    console.error('Network issue:', error.message);
+    console.error("Network issue:", error.message);
   }
 }
 ```
@@ -466,17 +475,18 @@ for (const position of positions) {
   sdk.feed.subscribeToPrice(position.pair, (priceData) => {
     const currentPrice = priceData.price;
     const entryPrice = position.entryPrice;
-    
-    const pnlPercent = position.side === PositionSide.LONG
-      ? ((currentPrice - entryPrice) / entryPrice) * 100 * position.leverage
-      : ((entryPrice - currentPrice) / entryPrice) * 100 * position.leverage;
-    
+
+    const pnlPercent =
+      position.side === PositionSide.LONG
+        ? ((currentPrice - entryPrice) / entryPrice) * 100 * position.leverage
+        : ((entryPrice - currentPrice) / entryPrice) * 100 * position.leverage;
+
     console.log(`${position.pair}: ${pnlPercent.toFixed(2)}% PnL`);
-    
+
     // Auto-close if profit target reached
     if (pnlPercent >= 50) {
       await sdk.trader.closePosition({ positionId: position.id });
-      console.log('Profit target reached, position closed!');
+      console.log("Profit target reached, position closed!");
     }
   });
 }
@@ -486,26 +496,30 @@ for (const position of positions) {
 
 ```typescript
 class RiskManager {
-  constructor(private sdk: AvantisSDK, private maxDrawdown: number = 10) {}
-  
+  constructor(
+    private sdk: AvantisSDK,
+    private maxDrawdown: number = 10
+  ) {}
+
   async monitorRisk() {
     const account = await this.sdk.trader.getAccountInfo();
     const initialBalance = account.usdcBalance;
-    
+
     setInterval(async () => {
       const current = await this.sdk.trader.getAccountInfo();
-      const drawdown = ((initialBalance - current.usdcBalance) / initialBalance) * 100;
-      
+      const drawdown =
+        ((initialBalance - current.usdcBalance) / initialBalance) * 100;
+
       if (drawdown >= this.maxDrawdown) {
         console.warn(`Max drawdown reached: ${drawdown.toFixed(2)}%`);
-        
+
         // Close all positions
         for (const position of current.positions) {
           await this.sdk.trader.closePosition({ positionId: position.id });
         }
-        console.log('All positions closed due to max drawdown');
+        console.log("All positions closed due to max drawdown");
       }
-      
+
       // Check margin level
       if (current.marginLevel < 150) {
         console.warn(`Low margin level: ${current.marginLevel}%`);
@@ -521,13 +535,13 @@ class RiskManager {
 
 ```typescript
 // Mainnet (Base)
-const sdk = new AvantisSDK('base');
+const sdk = new AvantisSDK("base");
 
 // Testnet (Base Sepolia)
-const sdk = new AvantisSDK('base-sepolia');
+const sdk = new AvantisSDK("base-sepolia");
 
 // Custom RPC
-const sdk = new AvantisSDK('base', 'https://your-rpc-url.com');
+const sdk = new AvantisSDK("base", "https://your-rpc-url.com");
 
 // Get network info
 const network = sdk.trader.getNetwork();
@@ -539,29 +553,79 @@ console.log(`Network: ${network.name} (Chain ID: ${network.chainId})`);
 ```typescript
 // Private key (Node.js)
 await sdk.setSigner({
-  type: 'privateKey',
-  privateKey: '0x...'
+  type: "privateKey",
+  privateKey: "0x...",
 });
 
 // Mnemonic phrase
 await sdk.setSigner({
-  type: 'mnemonic',
-  mnemonic: 'your twelve word phrase...',
-  path: "m/44'/60'/0'/0/0" // Optional HD path
+  type: "mnemonic",
+  mnemonic: "your twelve word phrase...",
+  path: "m/44'/60'/0'/0/0", // Optional HD path
 });
 
-// Account Abstraction (e.g., with Kernel/ZeroDev)
-// The SDK is built with viem, making it compatible with smart account libraries
-import { createKernelAccount } from '@zerodev/sdk';
+// Account Abstraction with viem WalletClient (e.g., ZeroDev, Privy)
+import { createWalletClient } from "viem";
 
-const kernelAccount = await createKernelAccount(...);
+const walletClient = createWalletClient({
+  account: yourAccount,
+  chain: base,
+  transport: http(rpcUrl),
+});
+
 await sdk.setSigner({
-  type: 'privateKey',
-  privateKey: kernelAccount.privateKey
+  type: "viemClient",
+  client: walletClient,
+});
+
+// Gasless Transactions with ZeroDev Paymaster
+await sdk.setSigner({
+  type: "viemClient",
+  client: zerodevKernelClient,
+  gasless: true, // 🔥 Enable gasless transactions!
 });
 ```
 
-> **Account Abstraction Support**: The SDK uses [viem](https://viem.sh) internally, making it fully compatible with viem-based account abstraction libraries like Kernel, Biconomy, and Safe.
+> **Account Abstraction Support**: The SDK uses [viem](https://viem.sh) internally, making it fully compatible with viem-based account abstraction libraries like ZeroDev, Kernel, Biconomy, and Safe.
+
+### Gasless Transactions (ZeroDev + Privy)
+
+Trade without gas fees using ZeroDev paymaster:
+
+```typescript
+import { AvantisSDK } from "@todayapp/avantis-sdk";
+
+const sdk = new AvantisSDK("base");
+
+// Enable gasless mode with ZeroDev kernel client
+await sdk.setSigner({
+  type: "viemClient",
+  client: zerodevKernelClient,
+  gasless: true, // Users don't need ETH for gas!
+});
+
+// All operations are now gasless
+await sdk.openPosition({
+  pair: "ETH/USD",
+  side: "long",
+  size: 1000,
+  leverage: 10,
+});
+await sdk.closePosition({ positionId: "0-0" });
+await sdk.updatePosition({ positionId: "0-0", takeProfit: 2500 });
+
+// Check if gasless mode is enabled
+console.log(sdk.trader.isGaslessEnabled()); // true
+
+// Switch back to regular mode (user pays gas)
+await sdk.setSigner({
+  type: "viemClient",
+  client: walletClient,
+  gasless: false,
+});
+```
+
+> **See [Gasless Trading Guide](./docs/GASLESS_TRANSACTIONS.md) for complete ZeroDev + Privy integration**
 
 ## 📝 API Reference
 
@@ -613,19 +677,20 @@ await sdk.setSigner({
 
 The SDK integrates with multiple data sources, each with specific capabilities:
 
-| Feature | Socket API | Pyth Network | On-Chain | FeedClient API |
-|---------|-----------|--------------|----------|----------------|
-| Market metadata | ✅ | ❌ | ✅ | ❌ |
-| Current prices | ❌ | ✅ | ❌ | ❌ |
-| Open interest | ✅ | ❌ | ✅ | ❌ |
-| Trading volume | ❌ | ❌ | ⚠️ Events only | ❌ |
-| 24h price change | ❌ | ❌ | ❌ | ❌ |
-| Historical candles | ❌ | ❌ | ❌ | ❌ |
-| Funding rates | ❌ | ❌ | ✅ | ❌ |
+| Feature            | Socket API | Pyth Network | On-Chain       | FeedClient API |
+| ------------------ | ---------- | ------------ | -------------- | -------------- |
+| Market metadata    | ✅         | ❌           | ✅             | ❌             |
+| Current prices     | ❌         | ✅           | ❌             | ❌             |
+| Open interest      | ✅         | ❌           | ✅             | ❌             |
+| Trading volume     | ❌         | ❌           | ⚠️ Events only | ❌             |
+| 24h price change   | ❌         | ❌           | ❌             | ❌             |
+| Historical candles | ❌         | ❌           | ❌             | ❌             |
+| Funding rates      | ❌         | ❌           | ✅             | ❌             |
 
 ### Not Available
 
 The following methods in `FeedClient` are **deprecated** and will throw errors:
+
 - ❌ `feed.getMarketStats()` - No volume24h or 24h price change data available
 - ❌ `feed.getLatestPrice()` - Use Pyth Network instead
 - ❌ `feed.getCandles()` - No historical candle data API
@@ -661,6 +726,7 @@ This SDK uses [viem](https://viem.sh) as its blockchain interaction library. Vie
 #### Why Viem?
 
 The SDK was migrated from ethers.js to viem to enable:
+
 1. **Account Abstraction Support**: Works seamlessly with Kernel, ZeroDev, Biconomy, Safe, and other viem-based AA libraries
 2. **Better Developer Experience**: Enhanced TypeScript support and modern APIs
 3. **Performance**: Smaller bundle size and optimized for tree-shaking
@@ -741,18 +807,22 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## ⚠️ Important Disclaimers
 
 ### Beta Software Notice
+
 This SDK is currently in **BETA** and is an **UNOFFICIAL** implementation. It has not been audited or officially endorsed by Avantis. While extensive testing has been performed, users should:
+
 - Test thoroughly in testnet before mainnet use
 - Start with small amounts when using in production
 - Monitor all transactions carefully
 - Report any issues to the GitHub repository
 
 ### Trading Risk Disclaimer
+
 Trading perpetual futures involves significant risk of loss. This software is provided "as is" without warranty of any kind. Always do your own research, trade responsibly, and never invest more than you can afford to lose. Past performance is not indicative of future results.
 
 ### No Warranty
+
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ---
 
-*This is an unofficial, community-developed SDK. Not affiliated with or endorsed by Avantis.*
+_This is an unofficial, community-developed SDK. Not affiliated with or endorsed by Avantis._

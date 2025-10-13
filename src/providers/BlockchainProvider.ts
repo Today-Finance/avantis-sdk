@@ -43,6 +43,7 @@ export class BlockchainProvider {
   private walletClient?: WalletClient;
   private account?: Account;
   private network: NetworkConfig;
+  private gaslessEnabled: boolean = false;
   private readonly config: {
     confirmations: number;
     timeout: number;
@@ -89,6 +90,18 @@ export class BlockchainProvider {
     try {
       const chain = CHAIN_MAP[this.network.chainId];
 
+      // Validate gasless configuration
+      if (config.gasless === true && config.type !== "viemClient") {
+        throw new ValidationError(
+          `Gasless mode only works with type: "viemClient" (ZeroDev/Smart Accounts). ` +
+            `You cannot use gasless with type: "${config.type}". ` +
+            `Either use a ZeroDev kernel client or set gasless: false.`
+        );
+      }
+
+      // Store gasless flag (only set for viemClient)
+      this.gaslessEnabled = false; // Default to false
+
       switch (config.type) {
         case "privateKey":
           if (!config.privateKey) {
@@ -103,6 +116,10 @@ export class BlockchainProvider {
             chain,
             transport: http(this.network.rpcUrl),
           }) as any;
+          console.log(
+            "[BlockchainProvider] Set private key signer:",
+            this.account.address
+          );
           break;
 
         case "mnemonic":
@@ -115,6 +132,10 @@ export class BlockchainProvider {
             chain,
             transport: http(this.network.rpcUrl),
           }) as any;
+          console.log(
+            "[BlockchainProvider] Set mnemonic signer:",
+            this.account.address
+          );
           break;
 
         case "jsonRpc":
@@ -149,9 +170,13 @@ export class BlockchainProvider {
             throw new ValidationError("Client must have an account");
           }
 
+          // Enable gasless mode for viemClient (e.g., ZeroDev with paymaster)
+          this.gaslessEnabled = config.gasless === true;
+
           console.log(
             "[BlockchainProvider] Set viem wallet client:",
-            this.account.address
+            this.account.address,
+            `(gasless: ${this.gaslessEnabled})`
           );
           break;
 
@@ -181,6 +206,13 @@ export class BlockchainProvider {
       throw new ValidationError("Account not configured", "account");
     }
     return this.account;
+  }
+
+  /**
+   * Checks if gasless mode is enabled
+   */
+  public isGaslessEnabled(): boolean {
+    return this.gaslessEnabled;
   }
 
   /**

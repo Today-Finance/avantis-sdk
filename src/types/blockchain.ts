@@ -48,6 +48,7 @@ export interface SignerConfig {
   path?: string;
   provider?: any; // For injected providers (MetaMask, etc.)
   client?: WalletClient; // For viem WalletClient (like kernel client)
+  gasless?: boolean; // Flag to enable gasless transactions (e.g., via ZeroDev paymaster)
 }
 
 export interface TransactionConfig {
