@@ -3,8 +3,8 @@
  * Includes liquidation price, PnL, margin requirements, and risk calculations
  */
 
-import Decimal from 'decimal.js';
-import { PositionSide } from '../types';
+import Decimal from "decimal.js";
+import { PositionSide } from "../types";
 
 /**
  * Calculates the liquidation price for a position
@@ -33,15 +33,45 @@ export function calculateLiquidationPrice(
 }
 
 /**
- * Calculates unrealized PnL for a position
+ * Calculates unrealized PnL for a position using the correct spot formula
+ * Formula: Gross PNL = (Current price - Entry price) * Position Size in Base Currency
+ * Where Position Size in Base Currency = Position Size in USDC / Entry Price
+ *
  * @param entryPrice - Position entry price
  * @param currentPrice - Current market price
  * @param size - Position size in USDC
  * @param side - Position side (LONG or SHORT)
- * @param leverage - Position leverage
  * @returns Unrealized PnL in USDC
  */
 export function calculateUnrealizedPnL(
+  entryPrice: Decimal | number | string,
+  currentPrice: Decimal | number | string,
+  size: Decimal | number | string,
+  side: PositionSide
+): Decimal {
+  const entry = new Decimal(entryPrice);
+  const current = new Decimal(currentPrice);
+  const positionSizeUSDC = new Decimal(size);
+
+  // Calculate position size in base currency (e.g., SOL amount if trading SOL/USD)
+  // Position Size in Base = Position Size in USDC / Entry Price
+  const positionSizeBase = positionSizeUSDC.div(entry);
+
+  // Calculate price difference
+  const priceDiff =
+    side === PositionSide.LONG
+      ? current.minus(entry) // Long: profit when price goes up
+      : entry.minus(current); // Short: profit when price goes down
+
+  // Gross PNL = Price Difference * Position Size in Base Currency
+  return priceDiff.mul(positionSizeBase);
+}
+
+/**
+ * DEPRECATED: Legacy leveraged PnL calculation
+ * Use calculateUnrealizedPnL instead for correct spot PnL calculation
+ */
+export function calculateUnrealizedPnLLeveraged(
   entryPrice: Decimal | number | string,
   currentPrice: Decimal | number | string,
   size: Decimal | number | string,
@@ -66,13 +96,36 @@ export function calculateUnrealizedPnL(
 
 /**
  * Calculates PnL percentage for a position
+ * Formula: Gross PNL % = [(Current price - Entry price) / Entry price] * 100
+ *
  * @param entryPrice - Position entry price
  * @param currentPrice - Current market price
  * @param side - Position side (LONG or SHORT)
- * @param leverage - Position leverage
- * @returns PnL percentage (100 = +100%, -50 = -50%)
+ * @returns PnL percentage (0.23 = +0.23%, -0.50 = -0.50%)
  */
 export function calculatePnLPercentage(
+  entryPrice: Decimal | number | string,
+  currentPrice: Decimal | number | string,
+  side: PositionSide
+): number {
+  const entry = new Decimal(entryPrice);
+  const current = new Decimal(currentPrice);
+
+  // Calculate price difference
+  const priceDiff =
+    side === PositionSide.LONG
+      ? current.minus(entry) // Long: profit when price goes up
+      : entry.minus(current); // Short: profit when price goes down
+
+  // PNL % = (Price Difference / Entry Price) * 100
+  return priceDiff.div(entry).mul(100).toNumber();
+}
+
+/**
+ * DEPRECATED: Legacy leveraged PnL percentage calculation
+ * Use calculatePnLPercentage instead for correct spot PnL percentage
+ */
+export function calculatePnLPercentageLeveraged(
   entryPrice: Decimal | number | string,
   currentPrice: Decimal | number | string,
   side: PositionSide,
@@ -244,7 +297,9 @@ export function calculateBreakEvenPrice(
   side: PositionSide
 ): Decimal {
   const entry = new Decimal(entryPrice);
-  const totalFeePercent = new Decimal(openFeePercent + closeFeePercent).div(100);
+  const totalFeePercent = new Decimal(openFeePercent + closeFeePercent).div(
+    100
+  );
 
   // Fee impact on price = (total_fee_percent * leverage)
   const feeImpact = totalFeePercent.mul(leverage);
@@ -289,7 +344,9 @@ export interface TradeSimulationResult {
   }>;
 }
 
-export function simulateTrade(params: TradeSimulationParams): TradeSimulationResult {
+export function simulateTrade(
+  params: TradeSimulationParams
+): TradeSimulationResult {
   const {
     pair,
     entryPrice,
@@ -298,29 +355,47 @@ export function simulateTrade(params: TradeSimulationParams): TradeSimulationRes
     side,
     openFeePercent = 0.1,
     closeFeePercent = 0.1,
-    targetPrices = []
+    targetPrices = [],
   } = params;
 
   const collateralRequired = calculateRequiredCollateral(size, leverage);
-  const liquidationPrice = calculateLiquidationPrice(entryPrice, leverage, side);
-  const breakEvenPrice = calculateBreakEvenPrice(entryPrice, openFeePercent, closeFeePercent, leverage, side);
+  const liquidationPrice = calculateLiquidationPrice(
+    entryPrice,
+    leverage,
+    side
+  );
+  const breakEvenPrice = calculateBreakEvenPrice(
+    entryPrice,
+    openFeePercent,
+    closeFeePercent,
+    leverage,
+    side
+  );
 
   // Max loss is collateral (minus fees already paid)
   const maxLoss = collateralRequired.mul(0.95); // Assuming 5% remaining after liquidation
 
   // Generate scenarios for target prices
-  const scenarios = targetPrices.map(targetPrice => {
-    const pnl = calculateUnrealizedPnL(entryPrice, targetPrice, size, side, leverage);
-    const pnlPercent = calculatePnLPercentage(entryPrice, targetPrice, side, leverage);
-    const distanceToLiquidation = calculateDistanceToLiquidation(targetPrice, liquidationPrice, side);
-    const effectiveLeverage = calculateEffectiveLeverage(collateralRequired, pnl, size);
+  const scenarios = targetPrices.map((targetPrice) => {
+    const pnl = calculateUnrealizedPnL(entryPrice, targetPrice, size, side);
+    const pnlPercent = calculatePnLPercentage(entryPrice, targetPrice, side);
+    const distanceToLiquidation = calculateDistanceToLiquidation(
+      targetPrice,
+      liquidationPrice,
+      side
+    );
+    const effectiveLeverage = calculateEffectiveLeverage(
+      collateralRequired,
+      pnl,
+      size
+    );
 
     return {
       price: new Decimal(targetPrice),
       pnl,
       pnlPercent,
       distanceToLiquidation,
-      effectiveLeverage
+      effectiveLeverage,
     };
   });
 
@@ -330,6 +405,6 @@ export function simulateTrade(params: TradeSimulationParams): TradeSimulationRes
     liquidationPrice,
     breakEvenPrice,
     maxLoss,
-    scenarios
+    scenarios,
   };
 }

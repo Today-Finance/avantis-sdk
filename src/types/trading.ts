@@ -113,6 +113,7 @@ export interface Position {
   markPrice: Decimal;
   liquidationPrice: Decimal;
   unrealizedPnl: Decimal;
+  unrealizedPnlPercent: number; // PNL percentage: [(Current price - Entry price) / Entry price] * 100
   realizedPnl: Decimal;
   stopLoss?: Decimal;
   takeProfit?: Decimal;

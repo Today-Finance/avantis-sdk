@@ -774,9 +774,11 @@ export class TraderClient extends EventEmitter {
     const entryPrice = new Decimal(trade.openPrice.toString()).div(1e10);
 
     // Calculate liquidation price
-    const { calculateLiquidationPrice, calculateUnrealizedPnL } = await import(
-      "../utils/calculations"
-    );
+    const {
+      calculateLiquidationPrice,
+      calculateUnrealizedPnL,
+      calculatePnLPercentage,
+    } = await import("../utils/calculations");
     const liquidationPrice = calculateLiquidationPrice(
       entryPrice,
       leverage,
@@ -819,13 +821,21 @@ export class TraderClient extends EventEmitter {
       // Use entry price as fallback
     }
 
-    // Calculate unrealized PnL
+    // Calculate unrealized PnL using correct spot formula
+    // Formula: Gross PNL = (Current price - Entry price) * Position Size in Base Currency
     const unrealizedPnl = calculateUnrealizedPnL(
       entryPrice,
       markPrice,
       size,
-      side,
-      leverage
+      side
+    );
+
+    // Calculate unrealized PnL percentage
+    // Formula: Gross PNL % = [(Current price - Entry price) / Entry price] * 100
+    const unrealizedPnlPercent = calculatePnLPercentage(
+      entryPrice,
+      markPrice,
+      side
     );
 
     // Calculate maintenance margin (typically 0.5% of position size)
@@ -843,6 +853,7 @@ export class TraderClient extends EventEmitter {
       markPrice,
       liquidationPrice,
       unrealizedPnl,
+      unrealizedPnlPercent,
       realizedPnl: new Decimal(0), // Not tracked in this version
       stopLoss:
         trade.sl && Number(trade.sl) > 0
