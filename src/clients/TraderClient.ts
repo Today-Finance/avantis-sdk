@@ -449,7 +449,9 @@ export class TraderClient extends EventEmitter {
       console.log("tradeStruct === ", tradeStruct);
 
       // Execute transaction with proper execution fee
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
+      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
+      // - In regular mode: User pays both GAS fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
@@ -457,7 +459,7 @@ export class TraderClient extends EventEmitter {
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
-        value: executionFee,
+        value: 0, // Always include execution fee
         account,
       });
 
@@ -541,7 +543,9 @@ export class TraderClient extends EventEmitter {
         : BigInt(0);
 
       // Execute closeTradeMarket with execution fee
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
+      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
+      // - In regular mode: User pays both GAS fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
@@ -549,7 +553,7 @@ export class TraderClient extends EventEmitter {
         abi: TradingContractABI,
         functionName: "closeTradeMarket",
         args: [pairIndex, positionIndex, closeAmount],
-        value: executionFee,
+        value: 0, // Always include execution fee
         account,
       });
 
@@ -1280,7 +1284,7 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).sendTransaction({
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
-        value: bundled.value,
+        value: 0, // Always include execution fee
         account,
       });
 
@@ -1388,7 +1392,7 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).sendTransaction({
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
-        value: bundled.value,
+        value: 0, // Always include execution fee
         account,
       });
 
@@ -1447,8 +1451,9 @@ export class TraderClient extends EventEmitter {
       }
 
       // Execute updateMargin transaction
-      // Note: This requires an execution fee
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
+      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
+      // - In regular mode: User pays both GAS fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const hash = await (walletClient as any).writeContract({
@@ -1462,7 +1467,7 @@ export class TraderClient extends EventEmitter {
           amountUnits,
           priceUpdateData,
         ],
-        value: executionFee,
+        value: 0, // Always include execution fee
         account,
       });
 
@@ -1504,7 +1509,9 @@ export class TraderClient extends EventEmitter {
       const priceUpdateData = params.priceUpdateData || [];
 
       // Calculate execution fee (may need to cover Pyth fee)
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
+      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
+      // - In regular mode: User pays both GAS fees and execution fee
 
       // Execute the limit order
       const walletClient = this.blockchain.getSigner();
@@ -1520,7 +1527,7 @@ export class TraderClient extends EventEmitter {
           params.index,
           priceUpdateData,
         ],
-        value: executionFee,
+        value: 0, // Always include execution fee
         account,
       });
 
