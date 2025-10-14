@@ -759,10 +759,19 @@ export class TraderClient extends EventEmitter {
   ): Promise<Position> {
     const pairName = await this.getPairNameFromAPI(pairIndex);
     const side = trade.buy ? PositionSide.LONG : PositionSide.SHORT;
+
+    // Collateral (initialPosToken) uses 6 decimals (actual USDC amount)
     const collateral = new Decimal(formatUSDC(trade.initialPosToken));
-    const leverage = Number(trade.leverage);
-    const size = new Decimal(formatUSDC(trade.positionSizeUSDC));
-    const entryPrice = new Decimal(formatUSDC(trade.openPrice));
+
+    // Leverage uses 10 decimals in the contract
+    const leverage = Number(trade.leverage) / 1e10;
+
+    // Calculate position size from collateral and leverage
+    // Size = Collateral × Leverage (this is the USD value of the position)
+    const size = collateral.mul(leverage);
+
+    // Prices use 10 decimals in the contract
+    const entryPrice = new Decimal(trade.openPrice.toString()).div(1e10);
 
     // Calculate liquidation price
     const { calculateLiquidationPrice, calculateUnrealizedPnL } = await import(
@@ -774,24 +783,37 @@ export class TraderClient extends EventEmitter {
       side
     );
 
-    // Get current mark price (try to fetch, fallback to entry price)
+    // Get current mark price (try multiple sources)
     let markPrice = entryPrice;
     try {
-      // Try to get current price from price aggregator contract if available
-      if (
-        this.network.contracts.priceAggregator &&
-        this.network.contracts.priceAggregator !==
-          "0x0000000000000000000000000000000000000000"
-      ) {
-        const priceAggregatorContract: any = getContract({
-          address: this.network.contracts.priceAggregator as `0x${string}`,
-          abi: (await import("../contracts")).PriceAggregatorContractABI,
-          client: this.blockchain.getProvider() as any,
-        });
-        const priceData = await priceAggregatorContract.read.getPrice([
-          pairIndex,
-        ]);
-        markPrice = new Decimal(formatUSDC(priceData.price || priceData[0]));
+      // First, try to get current price from Pyth via Socket API
+      try {
+        const marketConfig = await this.getMarketConfigByPairIndex(pairIndex);
+        if (marketConfig && marketConfig.pythFeedId) {
+          const pythPrice = await this.pythClient.getFormattedPriceByFeedId(
+            marketConfig.pythFeedId
+          );
+          markPrice = new Decimal(pythPrice.price);
+        }
+      } catch (pythError) {
+        // If Pyth fails, try price aggregator contract
+        if (
+          this.network.contracts.priceAggregator &&
+          this.network.contracts.priceAggregator !==
+            "0x0000000000000000000000000000000000000000"
+        ) {
+          const priceAggregatorContract: any = getContract({
+            address: this.network.contracts.priceAggregator as `0x${string}`,
+            abi: (await import("../contracts")).PriceAggregatorContractABI,
+            client: this.blockchain.getProvider() as any,
+          });
+          const priceData = await priceAggregatorContract.read.getPrice([
+            pairIndex,
+          ]);
+          // Price from aggregator also uses 10 decimals
+          const priceValue = priceData.price || priceData[0];
+          markPrice = new Decimal(priceValue.toString()).div(1e10);
+        }
       }
     } catch {
       // Use entry price as fallback
@@ -824,11 +846,11 @@ export class TraderClient extends EventEmitter {
       realizedPnl: new Decimal(0), // Not tracked in this version
       stopLoss:
         trade.sl && Number(trade.sl) > 0
-          ? new Decimal(formatUSDC(trade.sl))
+          ? new Decimal(trade.sl.toString()).div(1e10)
           : undefined,
       takeProfit:
         trade.tp && Number(trade.tp) > 0
-          ? new Decimal(formatUSDC(trade.tp))
+          ? new Decimal(trade.tp.toString()).div(1e10)
           : undefined,
       margin: collateral,
       maintenanceMargin,
@@ -1014,6 +1036,61 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Gets market configuration by pair index from Socket API with caching
+   * @param pairIndex - The pair index
+   * @returns Market configuration with dynamic limits
+   */
+  private async getMarketConfigByPairIndex(pairIndex: number): Promise<any> {
+    // Ensure cache is populated
+    if (
+      !this.marketConfigCache ||
+      Date.now() - this.marketCacheTimestamp > this.MARKET_CACHE_TTL_MS
+    ) {
+      await this.refreshMarketCache();
+    }
+
+    // Find market by pairIndex
+    for (const [, config] of this.marketConfigCache!) {
+      if (config.pairIndex === pairIndex) {
+        return config;
+      }
+    }
+
+    // If not found in cache, refresh and try again
+    await this.refreshMarketCache();
+    for (const [, config] of this.marketConfigCache!) {
+      if (config.pairIndex === pairIndex) {
+        return config;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Refreshes the market cache from Socket API
+   */
+  private async refreshMarketCache(): Promise<void> {
+    const markets = await this.socketAPI.getAllMarkets();
+    this.marketConfigCache = new Map();
+
+    markets.forEach((market) => {
+      this.marketConfigCache!.set(market.name.toUpperCase(), {
+        pairIndex: market.pairIndex,
+        name: market.name,
+        minPositionSizeUSDC: market.minPositionSizeUSDC,
+        maxPositionSizeUSDC: market.maxPositionSizeUSDC,
+        minLeverage: market.minLeverage,
+        maxLeverage: market.maxLeverage,
+        spreadPercent: market.spreadPercent,
+        pythFeedId: market.pythFeedId,
+      });
+    });
+
+    this.marketCacheTimestamp = Date.now();
+  }
+
+  /**
    * Gets market configuration from Socket API with caching (dynamic, accurate)
    * Provides real-time min/max position sizes, leverage limits, and spread
    * @param pairName - The pair name (e.g., "ETH/USD", "BTC/USD")
@@ -1025,24 +1102,7 @@ export class TraderClient extends EventEmitter {
       !this.marketConfigCache ||
       Date.now() - this.marketCacheTimestamp > this.MARKET_CACHE_TTL_MS
     ) {
-      // Refresh cache from Socket API
-      const markets = await this.socketAPI.getAllMarkets();
-      this.marketConfigCache = new Map();
-
-      markets.forEach((market) => {
-        this.marketConfigCache!.set(market.name.toUpperCase(), {
-          pairIndex: market.pairIndex,
-          name: market.name,
-          minPositionSizeUSDC: market.minPositionSizeUSDC,
-          maxPositionSizeUSDC: market.maxPositionSizeUSDC,
-          minLeverage: market.minLeverage,
-          maxLeverage: market.maxLeverage,
-          spreadPercent: market.spreadPercent,
-          pythFeedId: market.pythFeedId,
-        });
-      });
-
-      this.marketCacheTimestamp = Date.now();
+      await this.refreshMarketCache();
       console.log(
         `Refreshed market config cache: ${this.marketConfigCache.size} markets available`
       );
@@ -1240,19 +1300,54 @@ export class TraderClient extends EventEmitter {
           orderTypeValue = OrderTypeValue.MARKET;
       }
 
+      // Get current market price for market orders (same as openPosition method)
+      let openPriceUnits: bigint;
+      if (params.openPrice) {
+        // For limit orders, use provided price with 10 decimals
+        const limitPrice = new Decimal(params.openPrice);
+        openPriceUnits = BigInt(
+          limitPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+        );
+      } else {
+        // For market orders, fetch current price from Pyth
+        const priceData = await this.pythClient.getLatestPrice(params.pair);
+        // Convert Pyth price directly to 10 decimals
+        const expo = priceData.expo;
+        const pythPrice = new Decimal(priceData.price.toString());
+        const exponentAdjustment = 10 + expo; // e.g., 10 + (-8) = 2
+        openPriceUnits = BigInt(
+          pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0)
+        );
+      }
+
+      const collateralUnits = toUSDCUnits(collateral);
+      const positionSizeUnits = toUSDCUnits(size);
+      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
+      const takeProfitUnits = params.takeProfit
+        ? toUSDCUnits(params.takeProfit)
+        : 0;
+
+      // For MARKET_ZERO_FEE orders, positionSizeUSDC should contain collateral amount (not position size)
+      const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
+      const positionSizeValue = isZeroFeeOrder
+        ? collateralUnits
+        : positionSizeUnits;
+
       const tradeStruct = {
         trader: address,
         pairIndex: pairIndex,
         index: 0,
-        initialPosToken: toUSDCUnits(collateral),
-        positionSizeUSDC: toUSDCUnits(size),
-        openPrice: params.openPrice ? toUSDCUnits(params.openPrice) : 0,
+        initialPosToken: 0, // Always 0 for new positions
+        positionSizeUSDC: Number(positionSizeValue),
+        openPrice: Number(openPriceUnits),
         buy: isLong,
-        leverage: toLeverageUnits(params.leverage),
-        tp: params.takeProfit ? toUSDCUnits(params.takeProfit) : 0,
-        sl: params.stopLoss ? toUSDCUnits(params.stopLoss) : 0,
-        timestamp: 0,
+        leverage: Number(toLeverageUnits(params.leverage)),
+        tp: takeProfitUnits,
+        sl: stopLossUnits,
+        timestamp: 0, // Must be 0 for new positions
       };
+
+      console.log("openPositionWithFees trade struct === ", tradeStruct);
 
       const slippageUnits = parseUnits(
         ((params.slippage || 0.5) / 100).toString(),
@@ -1278,13 +1373,59 @@ export class TraderClient extends EventEmitter {
         executionFee,
       });
 
-      // Execute bundled transaction
+      console.log("openPositionWithFees bundled === ", bundled);
+
+      // Execute fee transfers and trade separately (Multicall3 won't work for transfers)
+      // Step 1: Transfer platform fee directly from user wallet
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).sendTransaction({
-        to: bundled.to as `0x${string}`,
-        data: bundled.data as `0x${string}`,
-        value: 0, // Always include execution fee
+
+      if (feeBreakdown.platformReceives.gt(0)) {
+        console.log(
+          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC`
+        );
+        const platformFeeHash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            feeConfig.platformWallet as `0x${string}`,
+            toUSDCUnits(feeBreakdown.platformReceives),
+          ],
+          account,
+        });
+        await this.blockchain.waitForTransaction(platformFeeHash);
+      }
+
+      // Step 2: Transfer referral fee (if applicable)
+      if (
+        params.platformFee.referralAddress &&
+        feeBreakdown.referralFee.gt(0)
+      ) {
+        console.log(
+          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC`
+        );
+        const referralFeeHash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            params.platformFee.referralAddress as `0x${string}`,
+            toUSDCUnits(feeBreakdown.referralFee),
+          ],
+          account,
+        });
+        await this.blockchain.waitForTransaction(referralFeeHash);
+      }
+
+      // Step 3: Execute the trade
+      console.log("Executing trade on Avantis...");
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: "openTrade",
+        args: [tradeStruct, orderTypeValue, slippageUnits],
+        value: executionFee, // Execution fee in ETH (0.00035 ETH - REQUIRED)
         account,
       });
 
@@ -1392,7 +1533,7 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).sendTransaction({
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
-        value: 0, // Always include execution fee
+        value: bundled.value, // Execution fee (0.00035 ETH)
         account,
       });
 
