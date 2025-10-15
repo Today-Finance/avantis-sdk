@@ -329,27 +329,27 @@ export class TraderClient extends EventEmitter {
           break;
         case OrderType.STOP_LIMIT:
           orderTypeValue = OrderTypeValue.STOP_LIMIT;
-          if (!params.openPrice) {
-            throw new ValidationError(
-              "Open price is required for stop-limit orders",
-              "openPrice"
-            );
-          }
           break;
         case OrderType.LIMIT:
           orderTypeValue = OrderTypeValue.LIMIT;
-          if (!params.openPrice) {
-            throw new ValidationError(
-              "Open price is required for limit orders",
-              "openPrice"
-            );
-          }
           break;
         case OrderType.MARKET_ZERO_FEE:
           orderTypeValue = OrderTypeValue.MARKET_ZERO_FEE;
           break;
         default:
           orderTypeValue = OrderTypeValue.MARKET;
+      }
+
+      // Validate openPrice requirements based on order type
+      // LIMIT and STOP_LIMIT orders REQUIRE openPrice to be explicitly provided
+      if (
+        (orderType === OrderType.LIMIT || orderType === OrderType.STOP_LIMIT) &&
+        !params.openPrice
+      ) {
+        throw new ValidationError(
+          `Open price is required for ${orderType === OrderType.LIMIT ? "limit" : "stop-limit"} orders`,
+          "openPrice"
+        );
       }
 
       // Validate position size using dynamic minimums from Socket API
@@ -403,16 +403,18 @@ export class TraderClient extends EventEmitter {
         10
       );
 
-      // Get current market price for market orders
+      // Get or fetch open price based on order type
       let openPriceUnits: bigint;
       if (params.openPrice) {
-        // For limit orders, use provided price with 10 decimals
-        const limitPrice = new Decimal(params.openPrice);
+        // Use provided price (required for LIMIT/STOP_LIMIT, optional for MARKET)
+        // Convert to 10 decimals format expected by contract
+        const providedPrice = new Decimal(params.openPrice);
         openPriceUnits = BigInt(
-          limitPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+          providedPrice.mul(new Decimal(10).pow(10)).toFixed(0)
         );
       } else {
-        // For market orders, fetch current price from Pyth
+        // Auto-fetch current price for MARKET and MARKET_ZERO_FEE orders
+        // This only executes for market orders since we validated above
         const priceData = await this.pythClient.getLatestPrice(params.pair);
         // Convert Pyth price directly to 10 decimals
         // Pyth format: price * 10^expo, Contract expects: price * 10^10
@@ -1311,16 +1313,30 @@ export class TraderClient extends EventEmitter {
           orderTypeValue = OrderTypeValue.MARKET;
       }
 
-      // Get current market price for market orders (same as openPosition method)
+      // Validate openPrice requirements based on order type
+      // LIMIT and STOP_LIMIT orders REQUIRE openPrice to be explicitly provided
+      if (
+        (orderType === OrderType.LIMIT || orderType === OrderType.STOP_LIMIT) &&
+        !params.openPrice
+      ) {
+        throw new ValidationError(
+          `Open price is required for ${orderType === OrderType.LIMIT ? "limit" : "stop-limit"} orders`,
+          "openPrice"
+        );
+      }
+
+      // Get or fetch open price based on order type (same as openPosition method)
       let openPriceUnits: bigint;
       if (params.openPrice) {
-        // For limit orders, use provided price with 10 decimals
-        const limitPrice = new Decimal(params.openPrice);
+        // Use provided price (required for LIMIT/STOP_LIMIT, optional for MARKET)
+        // Convert to 10 decimals format expected by contract
+        const providedPrice = new Decimal(params.openPrice);
         openPriceUnits = BigInt(
-          limitPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+          providedPrice.mul(new Decimal(10).pow(10)).toFixed(0)
         );
       } else {
-        // For market orders, fetch current price from Pyth
+        // Auto-fetch current price for MARKET and MARKET_ZERO_FEE orders
+        // This only executes for market orders since we validated above
         const priceData = await this.pythClient.getLatestPrice(params.pair);
         // Convert Pyth price directly to 10 decimals
         const expo = priceData.expo;
