@@ -327,6 +327,7 @@ export class BlockchainProvider {
       const receipt = await this.publicClient.waitForTransactionReceipt({
         hash: hash as Hash,
         confirmations,
+        timeout: this.config.timeout,
       });
 
       if (!receipt) {
