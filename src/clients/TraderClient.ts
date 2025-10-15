@@ -1583,7 +1583,7 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).sendTransaction({
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
-        value: bundled.value, // Execution fee (0.00035 ETH)
+        value: 0, // Execution fee (0.00035 ETH)
         account,
         nonce: currentNonce,
       });
