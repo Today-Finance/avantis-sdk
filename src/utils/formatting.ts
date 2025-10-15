@@ -1,5 +1,12 @@
-import Decimal from 'decimal.js';
-import { formatUnits, parseUnits, formatEther, parseEther, isAddress, getAddress } from 'viem';
+import Decimal from "decimal.js";
+import {
+  formatUnits,
+  parseUnits,
+  formatEther,
+  parseEther,
+  isAddress,
+  getAddress,
+} from "viem";
 
 /**
  * Formats a Decimal value to a string with specified decimal places
@@ -11,7 +18,10 @@ export function formatDecimal(value: Decimal, decimals: number = 2): string {
 /**
  * Formats a price value with appropriate decimal places
  */
-export function formatPrice(price: Decimal | number | string, decimals: number = 2): string {
+export function formatPrice(
+  price: Decimal | number | string,
+  decimals: number = 2
+): string {
   const priceDecimal = new Decimal(price);
 
   // For very small values, use more decimal places
@@ -25,7 +35,10 @@ export function formatPrice(price: Decimal | number | string, decimals: number =
 /**
  * Formats a percentage value
  */
-export function formatPercentage(value: Decimal | number, decimals: number = 2): string {
+export function formatPercentage(
+  value: Decimal | number,
+  decimals: number = 2
+): string {
   const percentage = new Decimal(value).mul(100);
   return `${percentage.toFixed(decimals)}%`;
 }
@@ -41,7 +54,7 @@ export function formatLeverage(leverage: number): string {
  * Formats USDC amount (6 decimals)
  */
 export function formatUSDC(amount: Decimal | bigint | string): string {
-  if (typeof amount === 'bigint') {
+  if (typeof amount === "bigint") {
     return formatUnits(amount, 6);
   }
   const amountDecimal = new Decimal(amount.toString());
@@ -66,10 +79,20 @@ export function toLeverageUnits(leverage: number): bigint {
 }
 
 /**
+ * Converts price to contract units (10 decimals)
+ * Avantis contracts expect prices (including TP/SL) with 10 decimal places
+ */
+export function toPriceUnits(price: Decimal | number | string): bigint {
+  const priceDecimal = new Decimal(price);
+  const units = priceDecimal.mul(1e10).toFixed(0);
+  return BigInt(units);
+}
+
+/**
  * Formats ETH amount (18 decimals)
  */
 export function formatETH(amount: bigint | string): string {
-  if (typeof amount === 'string') {
+  if (typeof amount === "string") {
     amount = BigInt(amount);
   }
   return formatEther(amount);
@@ -86,7 +109,11 @@ export function toWei(amount: Decimal | number | string): bigint {
 /**
  * Truncates an Ethereum address for display
  */
-export function truncateAddress(address: string, start: number = 6, end: number = 4): string {
+export function truncateAddress(
+  address: string,
+  start: number = 6,
+  end: number = 4
+): string {
   if (!isAddress(address)) {
     return address;
   }
@@ -114,21 +141,25 @@ export function formatDate(date: Date): string {
  * Formats a timestamp to readable date
  */
 export function formatTimestamp(timestamp: number | Date): string {
-  const date = typeof timestamp === 'number' ? new Date(timestamp * 1000) : timestamp;
+  const date =
+    typeof timestamp === "number" ? new Date(timestamp * 1000) : timestamp;
   return date.toLocaleString();
 }
 
 /**
  * Formats PnL value with color indicators
  */
-export function formatPnL(pnl: Decimal | number): { value: string; isProfit: boolean } {
+export function formatPnL(pnl: Decimal | number): {
+  value: string;
+  isProfit: boolean;
+} {
   const pnlDecimal = new Decimal(pnl);
   const isProfit = pnlDecimal.gte(0);
-  const prefix = isProfit ? '+' : '';
+  const prefix = isProfit ? "+" : "";
 
   return {
     value: `${prefix}${pnlDecimal.toFixed(2)}`,
-    isProfit
+    isProfit,
   };
 }
 
@@ -142,8 +173,11 @@ export function formatTradingPair(base: string, quote: string): string {
 /**
  * Parses trading pair string
  */
-export function parseTradingPair(pair: string): { base: string; quote: string } {
-  const [base, quote] = pair.split('/');
+export function parseTradingPair(pair: string): {
+  base: string;
+  quote: string;
+} {
+  const [base, quote] = pair.split("/");
   if (!base || !quote) {
     throw new Error(`Invalid trading pair format: ${pair}`);
   }
@@ -170,9 +204,12 @@ export function formatCompactNumber(value: Decimal | number): string {
 /**
  * Calculates and formats margin level percentage
  */
-export function formatMarginLevel(equity: Decimal, marginUsed: Decimal): string {
+export function formatMarginLevel(
+  equity: Decimal,
+  marginUsed: Decimal
+): string {
   if (marginUsed.eq(0)) {
-    return '∞';
+    return "∞";
   }
 
   const marginLevel = equity.div(marginUsed).mul(100);

@@ -51,6 +51,7 @@ import {
   formatUSDC,
   toUSDCUnits,
   toLeverageUnits,
+  toPriceUnits,
   formatETH,
   toWei,
 } from "../utils/formatting";
@@ -394,10 +395,12 @@ export class TraderClient extends EventEmitter {
       const isLong = params.side === PositionSide.LONG;
       const collateralUnits = toUSDCUnits(collateral);
       const positionSizeUnits = toUSDCUnits(size);
-      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
+      const stopLossUnits = params.stopLoss
+        ? toPriceUnits(params.stopLoss)
+        : BigInt(0);
       const takeProfitUnits = params.takeProfit
-        ? toUSDCUnits(params.takeProfit)
-        : 0;
+        ? toPriceUnits(params.takeProfit)
+        : BigInt(0);
       const slippageUnits = parseUnits(
         ((params.slippage || 0.5) / 100).toString(),
         10
@@ -439,16 +442,17 @@ export class TraderClient extends EventEmitter {
         pairIndex: pairIndex,
         index: 0, // This will be assigned by the contract
         initialPosToken: 0, // Always 0 for new positions
-        positionSizeUSDC: Number(positionSizeValue),
-        openPrice: Number(openPriceUnits),
+        positionSizeUSDC: positionSizeValue,
+        openPrice: openPriceUnits,
         buy: isLong,
-        leverage: Number(toLeverageUnits(params.leverage)),
+        leverage: toLeverageUnits(params.leverage),
         tp: takeProfitUnits,
         sl: stopLossUnits,
         timestamp: 0, // Must be 0 for new positions (contract will set timestamp)
       };
 
       console.log("tradeStruct === ", tradeStruct);
+      console.log("slippageUnits === ", slippageUnits);
 
       // Execute transaction with proper execution fee
       // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
@@ -461,7 +465,7 @@ export class TraderClient extends EventEmitter {
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
-        value: 0, // Always include execution fee
+        value: BigInt(0), // Always include execution fee
         account,
       });
 
@@ -555,7 +559,7 @@ export class TraderClient extends EventEmitter {
         abi: TradingContractABI,
         functionName: "closeTradeMarket",
         args: [pairIndex, positionIndex, closeAmount],
-        value: 0, // Always include execution fee
+        value: BigInt(0), // Always include execution fee
         account,
       });
 
@@ -607,10 +611,10 @@ export class TraderClient extends EventEmitter {
       const positionIndex = parseInt(positionIndexStr);
 
       const stopLossUnits = params.stopLoss
-        ? toUSDCUnits(params.stopLoss)
+        ? toPriceUnits(params.stopLoss)
         : BigInt(0);
       const takeProfitUnits = params.takeProfit
-        ? toUSDCUnits(params.takeProfit)
+        ? toPriceUnits(params.takeProfit)
         : BigInt(0);
 
       // Get pair name from Socket API for Pyth price data
@@ -630,6 +634,8 @@ export class TraderClient extends EventEmitter {
           );
         }
       }
+
+      console.log("priceUpdateData === ", priceUpdateData);
 
       // Execute updateTpAndSl transaction
       // Note: Contract expects (pairIndex, index, _newSl, _newTP, priceUpdateData)
@@ -934,13 +940,17 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      const priceUnits = toUSDCUnits(params.price);
+      const priceUnits = toPriceUnits(params.price);
       const slippageUnits = parseUnits(
         ((params.slippage || 0.5) / 100).toString(),
         10
       );
-      const tpUnits = params.takeProfit ? toUSDCUnits(params.takeProfit) : 0;
-      const slUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
+      const tpUnits = params.takeProfit
+        ? toPriceUnits(params.takeProfit)
+        : BigInt(0);
+      const slUnits = params.stopLoss
+        ? toPriceUnits(params.stopLoss)
+        : BigInt(0);
 
       // Execute updateOpenLimitOrder
       const walletClient = this.blockchain.getSigner();
@@ -1349,10 +1359,12 @@ export class TraderClient extends EventEmitter {
 
       const collateralUnits = toUSDCUnits(collateral);
       const positionSizeUnits = toUSDCUnits(size);
-      const stopLossUnits = params.stopLoss ? toUSDCUnits(params.stopLoss) : 0;
+      const stopLossUnits = params.stopLoss
+        ? toPriceUnits(params.stopLoss)
+        : BigInt(0);
       const takeProfitUnits = params.takeProfit
-        ? toUSDCUnits(params.takeProfit)
-        : 0;
+        ? toPriceUnits(params.takeProfit)
+        : BigInt(0);
 
       // For MARKET_ZERO_FEE orders, positionSizeUSDC should contain collateral amount (not position size)
       const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
@@ -1365,10 +1377,10 @@ export class TraderClient extends EventEmitter {
         pairIndex: pairIndex,
         index: 0,
         initialPosToken: 0, // Always 0 for new positions
-        positionSizeUSDC: Number(positionSizeValue),
-        openPrice: Number(openPriceUnits),
+        positionSizeUSDC: positionSizeValue,
+        openPrice: openPriceUnits,
         buy: isLong,
-        leverage: Number(toLeverageUnits(params.leverage)),
+        leverage: toLeverageUnits(params.leverage),
         tp: takeProfitUnits,
         sl: stopLossUnits,
         timestamp: 0, // Must be 0 for new positions
@@ -1635,7 +1647,7 @@ export class TraderClient extends EventEmitter {
           amountUnits,
           priceUpdateData,
         ],
-        value: 0, // Always include execution fee
+        value: BigInt(0), // Always include execution fee
         account,
       });
 
@@ -1695,7 +1707,7 @@ export class TraderClient extends EventEmitter {
           params.index,
           priceUpdateData,
         ],
-        value: 0, // Always include execution fee
+        value: BigInt(0), // Always include execution fee
         account,
       });
 
