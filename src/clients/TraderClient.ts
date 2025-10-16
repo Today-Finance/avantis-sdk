@@ -1475,7 +1475,7 @@ export class TraderClient extends EventEmitter {
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
-        value: 0, // Execution fee in ETH (0.00035 ETH - REQUIRED)
+        value: BigInt(0), // Execution fee in ETH (0.00035 ETH - REQUIRED)
         account,
         nonce: currentNonce,
       });
@@ -1595,7 +1595,7 @@ export class TraderClient extends EventEmitter {
       const hash = await (walletClient as any).sendTransaction({
         to: bundled.to as `0x${string}`,
         data: bundled.data as `0x${string}`,
-        value: 0, // Execution fee (0.00035 ETH)
+        value: BigInt(0), // Execution fee (0.00035 ETH)
         account,
         nonce: currentNonce,
       });
