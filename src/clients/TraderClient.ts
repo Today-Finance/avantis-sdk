@@ -1500,7 +1500,7 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
-   * Closes a position with platform fees (bundled transaction)
+   * Closes a position with platform fees (separate transactions)
    */
   public async closePositionWithFees(
     params: ClosePositionParams
@@ -1514,13 +1514,6 @@ export class TraderClient extends EventEmitter {
       ) {
         // Fall back to regular closePosition if fees not enabled
         return await this.closePosition(params);
-      }
-
-      if (!this.multicallBundler) {
-        throw new TradingError(
-          ErrorCode.NOT_IMPLEMENTED,
-          "Multicall bundler not initialized"
-        );
       }
 
       // Validate parameters
@@ -1552,50 +1545,84 @@ export class TraderClient extends EventEmitter {
         : BigInt(0);
 
       // Calculate platform fees on the closing size
-      // Note: This is simplified - in reality you might want to calculate based on PnL or returned collateral
       const closeSize = collateralToClose || new Decimal(100); // Default placeholder
       const feeBreakdown = this.feeManager.calculateFeeBreakdown(
         closeSize,
         params.platformFee
       );
 
-      // Bundle the transaction
-      const feeConfig = this.feeManager.getConfig();
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      // Check USDC balance for fees
+      const balance = await this.getUSDCBalance();
+      if (balance.lt(feeBreakdown.totalFee)) {
+        throw new TradingError(
+          ErrorCode.INSUFFICIENT_COLLATERAL,
+          `Insufficient USDC for fees. Required: ${feeBreakdown.totalFee.toFixed(2)}, Available: ${balance.toFixed(2)}`
+        );
+      }
 
-      const bundled = this.multicallBundler.bundleCloseWithFees({
-        usdcAddress: this.network.contracts.usdc,
-        tradingAddress: this.network.contracts.trading,
-        platformWallet: feeConfig.platformWallet,
-        referralAddress: params.platformFee.referralAddress,
-        platformFeeAmount: toUSDCUnits(feeBreakdown.platformReceives),
-        referralFeeAmount: params.platformFee.referralAddress
-          ? toUSDCUnits(feeBreakdown.referralFee)
-          : undefined,
-        pairIndex,
-        positionIndex,
-        closeAmount,
-        executionFee,
-      });
-
-      // Execute bundled transaction
+      // Execute fee transfers and close trade separately
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const publicClient = this.blockchain.getProvider();
+      const feeConfig = this.feeManager.getConfig();
 
       // Fetch the current nonce to avoid nonce conflicts
-      const currentNonce = await publicClient.getTransactionCount({
+      let currentNonce = await publicClient.getTransactionCount({
         address: account.address,
         blockTag: "pending",
       });
 
-      console.log(
-        `Executing bundled close transaction (nonce: ${currentNonce})...`
-      );
-      const hash = await (walletClient as any).sendTransaction({
-        to: bundled.to as `0x${string}`,
-        data: bundled.data as `0x${string}`,
-        value: BigInt(0), // Execution fee (0.00035 ETH)
+      // Step 1: Transfer platform fee (if applicable)
+      if (feeBreakdown.platformReceives.gt(0)) {
+        console.log(
+          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC (nonce: ${currentNonce})`
+        );
+        const platformFeeHash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            feeConfig.platformWallet as `0x${string}`,
+            toUSDCUnits(feeBreakdown.platformReceives),
+          ],
+          account,
+          nonce: currentNonce,
+        });
+        await this.blockchain.waitForTransaction(platformFeeHash);
+        currentNonce++; // Increment nonce for next transaction
+      }
+
+      // Step 2: Transfer referral fee (if applicable)
+      if (
+        params.platformFee.referralAddress &&
+        feeBreakdown.referralFee.gt(0)
+      ) {
+        console.log(
+          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC (nonce: ${currentNonce})`
+        );
+        const referralFeeHash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            params.platformFee.referralAddress as `0x${string}`,
+            toUSDCUnits(feeBreakdown.referralFee),
+          ],
+          account,
+          nonce: currentNonce,
+        });
+        await this.blockchain.waitForTransaction(referralFeeHash);
+        currentNonce++; // Increment nonce for next transaction
+      }
+
+      // Step 3: Close the position
+      console.log(`Closing position on Avantis... (nonce: ${currentNonce})`);
+      const hash = await (walletClient as any).writeContract({
+        address: this.network.contracts.trading as `0x${string}`,
+        abi: TradingContractABI,
+        functionName: "closeTradeMarket",
+        args: [pairIndex, positionIndex, closeAmount],
+        value: BigInt(0), // Execution fee in ETH (0.00035 ETH - REQUIRED)
         account,
         nonce: currentNonce,
       });
@@ -1606,7 +1633,6 @@ export class TraderClient extends EventEmitter {
         positionId: params.positionId,
         transactionHash: receipt.transactionHash,
         feeBreakdown,
-        bundledOperations: bundled.description,
       });
 
       return {
