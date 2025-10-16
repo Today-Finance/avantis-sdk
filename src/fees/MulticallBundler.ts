@@ -2,14 +2,15 @@
  * MulticallBundler - Handles bundling multiple transactions into a single Multicall3 transaction
  */
 
-import { encodeFunctionData, encodeAbiParameters, parseAbiParameters } from 'viem';
-import type {
-  CallData,
-  BundledTransaction
-} from '../types/platform-fees';
-import { Multicall3ContractABI } from '../contracts';
-import { MULTICALL3_ADDRESS } from './constants';
-import { TradingError, ErrorCode } from '../utils/errors';
+import {
+  encodeFunctionData,
+  encodeAbiParameters,
+  parseAbiParameters,
+} from "viem";
+import type { CallData, BundledTransaction } from "../types/platform-fees";
+import { Multicall3ContractABI } from "../contracts";
+import { MULTICALL3_ADDRESS } from "./constants";
+import { TradingError, ErrorCode } from "../utils/errors";
 
 export class MulticallBundler {
   private multicallAddress: string;
@@ -28,15 +29,15 @@ export class MulticallBundler {
   ): CallData {
     const approveAbi = [
       {
-        name: 'approve',
-        type: 'function',
-        stateMutability: 'nonpayable',
+        name: "approve",
+        type: "function",
+        stateMutability: "nonpayable",
         inputs: [
-          { name: 'spender', type: 'address' },
-          { name: 'amount', type: 'uint256' }
+          { name: "spender", type: "address" },
+          { name: "amount", type: "uint256" },
         ],
-        outputs: [{ name: '', type: 'bool' }]
-      }
+        outputs: [{ name: "", type: "bool" }],
+      },
     ] as const;
 
     return {
@@ -44,9 +45,9 @@ export class MulticallBundler {
       allowFailure: false,
       callData: encodeFunctionData({
         abi: approveAbi,
-        functionName: 'approve',
-        args: [spender as `0x${string}`, amount]
-      })
+        functionName: "approve",
+        args: [spender as `0x${string}`, amount],
+      }),
     };
   }
 
@@ -60,15 +61,15 @@ export class MulticallBundler {
   ): CallData {
     const transferAbi = [
       {
-        name: 'transfer',
-        type: 'function',
-        stateMutability: 'nonpayable',
+        name: "transfer",
+        type: "function",
+        stateMutability: "nonpayable",
         inputs: [
-          { name: 'to', type: 'address' },
-          { name: 'amount', type: 'uint256' }
+          { name: "to", type: "address" },
+          { name: "amount", type: "uint256" },
         ],
-        outputs: [{ name: '', type: 'bool' }]
-      }
+        outputs: [{ name: "", type: "bool" }],
+      },
     ] as const;
 
     return {
@@ -76,9 +77,9 @@ export class MulticallBundler {
       allowFailure: false,
       callData: encodeFunctionData({
         abi: transferAbi,
-        functionName: 'transfer',
-        args: [recipient as `0x${string}`, amount]
-      })
+        functionName: "transfer",
+        args: [recipient as `0x${string}`, amount],
+      }),
     };
   }
 
@@ -94,32 +95,32 @@ export class MulticallBundler {
   ): CallData {
     const openTradeAbi = [
       {
-        name: 'openTrade',
-        type: 'function',
-        stateMutability: 'payable',
+        name: "openTrade",
+        type: "function",
+        stateMutability: "payable",
         inputs: [
           {
-            name: 't',
-            type: 'tuple',
+            name: "t",
+            type: "tuple",
             components: [
-              { name: 'trader', type: 'address' },
-              { name: 'pairIndex', type: 'uint256' },
-              { name: 'index', type: 'uint256' },
-              { name: 'initialPosToken', type: 'uint256' },
-              { name: 'positionSizeUSDC', type: 'uint256' },
-              { name: 'openPrice', type: 'uint256' },
-              { name: 'buy', type: 'bool' },
-              { name: 'leverage', type: 'uint256' },
-              { name: 'tp', type: 'uint256' },
-              { name: 'sl', type: 'uint256' },
-              { name: 'timestamp', type: 'uint256' }
-            ]
+              { name: "trader", type: "address" },
+              { name: "pairIndex", type: "uint256" },
+              { name: "index", type: "uint256" },
+              { name: "initialPosToken", type: "uint256" },
+              { name: "positionSizeUSDC", type: "uint256" },
+              { name: "openPrice", type: "uint256" },
+              { name: "buy", type: "bool" },
+              { name: "leverage", type: "uint256" },
+              { name: "tp", type: "uint256" },
+              { name: "sl", type: "uint256" },
+              { name: "timestamp", type: "uint256" },
+            ],
           },
-          { name: '_type', type: 'uint8' },
-          { name: '_slippageP', type: 'uint256' }
+          { name: "_type", type: "uint8" },
+          { name: "_slippageP", type: "uint256" },
         ],
-        outputs: []
-      }
+        outputs: [],
+      },
     ] as const;
 
     return {
@@ -127,10 +128,10 @@ export class MulticallBundler {
       allowFailure: false,
       callData: encodeFunctionData({
         abi: openTradeAbi,
-        functionName: 'openTrade',
-        args: [tradeStruct, orderTypeValue, slippageUnits]
+        functionName: "openTrade",
+        args: [tradeStruct, orderTypeValue, slippageUnits],
       }),
-      value: executionFee
+      value: executionFee,
     };
   }
 
@@ -146,16 +147,16 @@ export class MulticallBundler {
   ): CallData {
     const closeTradeAbi = [
       {
-        name: 'closeTradeMarket',
-        type: 'function',
-        stateMutability: 'payable',
+        name: "closeTradeMarket",
+        type: "function",
+        stateMutability: "payable",
         inputs: [
-          { name: '_pairIndex', type: 'uint256' },
-          { name: '_index', type: 'uint256' },
-          { name: '_amount', type: 'uint256' }
+          { name: "_pairIndex", type: "uint256" },
+          { name: "_index", type: "uint256" },
+          { name: "_amount", type: "uint256" },
         ],
-        outputs: []
-      }
+        outputs: [],
+      },
     ] as const;
 
     return {
@@ -163,10 +164,10 @@ export class MulticallBundler {
       allowFailure: false,
       callData: encodeFunctionData({
         abi: closeTradeAbi,
-        functionName: 'closeTradeMarket',
-        args: [BigInt(pairIndex), BigInt(positionIndex), amount]
+        functionName: "closeTradeMarket",
+        args: [BigInt(pairIndex), BigInt(positionIndex), amount],
       }),
-      value: executionFee
+      value: executionFee,
     };
   }
 
@@ -180,7 +181,7 @@ export class MulticallBundler {
     if (calls.length === 0) {
       throw new TradingError(
         ErrorCode.INVALID_PARAMETER,
-        'At least one call is required for bundling'
+        "At least one call is required for bundling"
       );
     }
 
@@ -193,52 +194,52 @@ export class MulticallBundler {
     // Encode the multicall using viem
     const aggregate3Abi = [
       {
-        name: 'aggregate3',
-        type: 'function',
-        stateMutability: 'payable',
+        name: "aggregate3",
+        type: "function",
+        stateMutability: "payable",
         inputs: [
           {
-            name: 'calls',
-            type: 'tuple[]',
+            name: "calls",
+            type: "tuple[]",
             components: [
-              { name: 'target', type: 'address' },
-              { name: 'allowFailure', type: 'bool' },
-              { name: 'callData', type: 'bytes' },
-              { name: 'value', type: 'uint256' }
-            ]
-          }
+              { name: "target", type: "address" },
+              { name: "allowFailure", type: "bool" },
+              { name: "callData", type: "bytes" },
+              { name: "value", type: "uint256" },
+            ],
+          },
         ],
         outputs: [
           {
-            name: 'returnData',
-            type: 'tuple[]',
+            name: "returnData",
+            type: "tuple[]",
             components: [
-              { name: 'success', type: 'bool' },
-              { name: 'returnData', type: 'bytes' }
-            ]
-          }
-        ]
-      }
+              { name: "success", type: "bool" },
+              { name: "returnData", type: "bytes" },
+            ],
+          },
+        ],
+      },
     ] as const;
 
     const multicallData = encodeFunctionData({
       abi: aggregate3Abi,
-      functionName: 'aggregate3',
+      functionName: "aggregate3",
       args: [
-        calls.map(call => ({
+        calls.map((call) => ({
           target: call.target as `0x${string}`,
           allowFailure: call.allowFailure,
           callData: call.callData as `0x${string}`,
-          value: call.value || 0n
-        }))
-      ]
+          value: call.value || 0n,
+        })),
+      ],
     });
 
     return {
       to: this.multicallAddress,
       data: multicallData,
       value: totalValue,
-      description: description || this.generateDefaultDescriptions(calls)
+      description: description || this.generateDefaultDescriptions(calls),
     };
   }
 
@@ -262,42 +263,58 @@ export class MulticallBundler {
     const descriptions: string[] = [];
 
     // 1. Approve USDC for total amount (collateral + fees)
-    calls.push(this.createApprovalCall(
-      params.usdcAddress,
-      params.tradingAddress, // Trading contract needs approval for collateral
-      params.totalAmount
-    ));
+    calls.push(
+      this.createApprovalCall(
+        params.usdcAddress,
+        params.tradingAddress, // Trading contract needs approval for collateral
+        params.totalAmount
+      )
+    );
     descriptions.push(`Approve ${params.totalAmount} USDC`);
 
     // 2. Transfer platform fee
     if (params.platformFeeAmount > 0n) {
-      calls.push(this.createTransferCall(
-        params.usdcAddress,
-        params.platformWallet,
-        params.platformFeeAmount
-      ));
-      descriptions.push(`Transfer platform fee: ${params.platformFeeAmount} USDC`);
+      calls.push(
+        this.createTransferCall(
+          params.usdcAddress,
+          params.platformWallet,
+          params.platformFeeAmount
+        )
+      );
+      descriptions.push(
+        `Transfer platform fee: ${params.platformFeeAmount} USDC`
+      );
     }
 
     // 3. Transfer referral fee (if applicable)
-    if (params.referralAddress && params.referralFeeAmount && params.referralFeeAmount > 0n) {
-      calls.push(this.createTransferCall(
-        params.usdcAddress,
-        params.referralAddress,
-        params.referralFeeAmount
-      ));
-      descriptions.push(`Transfer referral fee: ${params.referralFeeAmount} USDC`);
+    if (
+      params.referralAddress &&
+      params.referralFeeAmount &&
+      params.referralFeeAmount > 0n
+    ) {
+      calls.push(
+        this.createTransferCall(
+          params.usdcAddress,
+          params.referralAddress,
+          params.referralFeeAmount
+        )
+      );
+      descriptions.push(
+        `Transfer referral fee: ${params.referralFeeAmount} USDC`
+      );
     }
 
     // 4. Execute trade
-    calls.push(this.createOpenTradeCall(
-      params.tradingAddress,
-      params.tradeStruct,
-      params.orderTypeValue,
-      params.slippageUnits,
-      params.executionFee
-    ));
-    descriptions.push('Execute trade on Avantis');
+    calls.push(
+      this.createOpenTradeCall(
+        params.tradingAddress,
+        params.tradeStruct,
+        params.orderTypeValue,
+        params.slippageUnits,
+        params.executionFee
+      )
+    );
+    descriptions.push("Execute trade on Avantis");
 
     return this.bundleCalls(calls, descriptions);
   }
@@ -320,35 +337,49 @@ export class MulticallBundler {
     const calls: CallData[] = [];
     const descriptions: string[] = [];
 
-    // 1. Transfer platform fee (from returned collateral)
+    // 1. Close position FIRST (returns collateral to user)
+    calls.push(
+      this.createCloseTradeCall(
+        params.tradingAddress,
+        params.pairIndex,
+        params.positionIndex,
+        params.closeAmount,
+        params.executionFee
+      )
+    );
+    descriptions.push("Close position on Avantis");
+
+    // 2. Transfer platform fee (from returned collateral)
     if (params.platformFeeAmount > 0n) {
-      calls.push(this.createTransferCall(
-        params.usdcAddress,
-        params.platformWallet,
-        params.platformFeeAmount
-      ));
-      descriptions.push(`Transfer platform fee: ${params.platformFeeAmount} USDC`);
+      calls.push(
+        this.createTransferCall(
+          params.usdcAddress,
+          params.platformWallet,
+          params.platformFeeAmount
+        )
+      );
+      descriptions.push(
+        `Transfer platform fee: ${params.platformFeeAmount} USDC`
+      );
     }
 
-    // 2. Transfer referral fee (if applicable)
-    if (params.referralAddress && params.referralFeeAmount && params.referralFeeAmount > 0n) {
-      calls.push(this.createTransferCall(
-        params.usdcAddress,
-        params.referralAddress,
-        params.referralFeeAmount
-      ));
-      descriptions.push(`Transfer referral fee: ${params.referralFeeAmount} USDC`);
+    // 3. Transfer referral fee (if applicable)
+    if (
+      params.referralAddress &&
+      params.referralFeeAmount &&
+      params.referralFeeAmount > 0n
+    ) {
+      calls.push(
+        this.createTransferCall(
+          params.usdcAddress,
+          params.referralAddress,
+          params.referralFeeAmount
+        )
+      );
+      descriptions.push(
+        `Transfer referral fee: ${params.referralFeeAmount} USDC`
+      );
     }
-
-    // 3. Close position
-    calls.push(this.createCloseTradeCall(
-      params.tradingAddress,
-      params.pairIndex,
-      params.positionIndex,
-      params.closeAmount,
-      params.executionFee
-    ));
-    descriptions.push('Close position on Avantis');
 
     return this.bundleCalls(calls, descriptions);
   }
@@ -369,12 +400,12 @@ export class MulticallBundler {
       // For now, returning a placeholder
       throw new TradingError(
         ErrorCode.NOT_IMPLEMENTED,
-        'decodeMulticallResult needs implementation with viem decodeFunctionResult'
+        "decodeMulticallResult needs implementation with viem decodeFunctionResult"
       );
     } catch (error) {
       throw new TradingError(
         ErrorCode.CONTRACT_CALL_FAILED,
-        'Failed to decode multicall result',
+        "Failed to decode multicall result",
         undefined,
         undefined,
         error
