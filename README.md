@@ -17,6 +17,7 @@ An unofficial TypeScript SDK for interacting with [Avantis](https://avantis.fina
 - 🚀 **Full Trading Suite**: Market orders, limit orders, stop orders, and position management
 - 🔮 **Dynamic Price Feeds**: Automatically supports ALL current and future Avantis markets via Socket API integration
 - 💰 **Platform Fee System**: Built-in fee management with referral support and transaction bundling
+- ⛽ **Gasless Transactions**: 9 "prepare" methods for integration with Privy and other gas sponsorship providers
 - 📊 **Real-time Data**: WebSocket-based live price feeds and market data
 - 💱 **89+ Trading Pairs**: Crypto, forex, commodities, stocks, and metals - automatically updated
 - 🌐 **Socket API Integration**: Fast, cached access to all market metadata, open interest, and asset filtering
@@ -563,6 +564,199 @@ await sdk.setSigner({
 
 > **Account Abstraction Support**: The SDK uses [viem](https://viem.sh) internally, making it fully compatible with viem-based account abstraction libraries like Kernel, Biconomy, and Safe.
 
+## 🔌 Gasless Transactions with Privy
+
+The SDK includes "prepare" methods that return transaction data **without executing** them. This enables integration with gasless transaction infrastructure like Privy's native gas sponsorship.
+
+### Overview
+
+Traditional flow (requires user to pay gas):
+```typescript
+// ❌ User pays gas fees
+await sdk.trader.openPosition({ ... });
+```
+
+Gasless flow with Privy:
+```typescript
+// ✅ Privy sponsors gas fees
+const txData = await sdk.trader.prepareOpenPositionTransaction({ ... });
+await privyClient.walletApi.ethereum.sendTransaction({
+  address: userWallet,
+  chainType: 'ethereum',
+  chainId: 8453,
+  transaction: { to: txData.to, data: txData.data, value: txData.value }
+});
+```
+
+### Prepare Methods
+
+All trading operations have corresponding "prepare" methods:
+
+#### Basic Operations
+
+```typescript
+// 1. Approve USDC spending
+const txData = await sdk.trader.prepareApproveTransaction(1000);
+// Returns: { to: usdcContract, data: encodedApprove, value: "0" }
+
+// 2. Open position
+const txData = await sdk.trader.prepareOpenPositionTransaction({
+  pair: 'ETH/USD',
+  side: PositionSide.LONG,
+  size: 1000,
+  leverage: 10,
+  orderType: OrderType.MARKET,
+  slippage: 1
+});
+
+// 3. Close position
+const txData = await sdk.trader.prepareClosePositionTransaction({
+  positionId: '0-123'
+});
+
+// 4. Update TP/SL
+const txData = await sdk.trader.prepareUpdatePositionTransaction({
+  positionId: '0-123',
+  takeProfit: 3500,
+  stopLoss: 2800
+});
+
+// 5. Update margin (add/remove collateral)
+const txData = await sdk.trader.prepareUpdateMarginTransaction({
+  pairIndex: 0,
+  positionIndex: 123,
+  amount: 100,
+  type: MarginUpdateType.ADD // or MarginUpdateType.REMOVE
+});
+```
+
+#### Limit Orders
+
+```typescript
+// 6. Cancel limit order
+const txData = await sdk.trader.prepareCancelLimitOrderTransaction({
+  pairIndex: 0,
+  orderIndex: 5
+});
+
+// 7. Update limit order
+const txData = await sdk.trader.prepareUpdateLimitOrderTransaction({
+  pairIndex: 0,
+  orderIndex: 5,
+  price: 3000,
+  slippage: 1,
+  takeProfit: 3200,
+  stopLoss: 2900
+});
+```
+
+#### Fee Bundling with Multicall3
+
+These methods use Multicall3 to **atomically bundle** fee transfers and trade execution:
+
+```typescript
+// 8. Open position with fees (atomic bundling)
+sdk.trader.initializeFeeManager({
+  platformWallet: '0xYourPlatform',
+  platformFeePercentage: 0.1
+});
+
+const txData = await sdk.trader.prepareOpenPositionWithFeesTransaction({
+  pair: 'BTC/USD',
+  side: PositionSide.LONG,
+  size: 5000,
+  leverage: 20,
+  orderType: OrderType.MARKET,
+  slippage: 1,
+  platformFee: {
+    enabled: true,
+    platformPercentage: 0.1,
+    referralAddress: '0xReferrer' // optional
+  }
+});
+// Returns Multicall3 transaction bundling:
+// 1. Platform fee USDC transfer
+// 2. Referral fee USDC transfer (if referrer exists)
+// 3. Open trade execution
+
+// 9. Close position with fees (atomic bundling)
+const txData = await sdk.trader.prepareClosePositionWithFeesTransaction({
+  positionId: '0-123',
+  platformFee: {
+    enabled: true,
+    platformPercentage: 0.1,
+    referralAddress: '0xReferrer'
+  }
+});
+// Returns Multicall3 transaction bundling:
+// 1. Platform fee USDC transfer
+// 2. Referral fee USDC transfer (if referrer exists)
+// 3. Close trade execution
+```
+
+### Integration Example
+
+```typescript
+import { AvantisSDK, PositionSide, OrderType } from '@todayapp/avantis-sdk';
+import { PrivyClient } from '@privy-io/server-auth';
+
+// Initialize SDK
+const sdk = new AvantisSDK('base', process.env.BASE_RPC_URL);
+
+// Initialize Privy
+const privyClient = new PrivyClient(
+  process.env.PRIVY_APP_ID,
+  process.env.PRIVY_APP_SECRET,
+  {
+    walletApi: {
+      authorizationPrivateKey: process.env.PRIVY_AUTH_PRIVATE_KEY
+    }
+  }
+);
+
+async function openPositionGasless(userId: string) {
+  // 1. Prepare transaction with SDK
+  const txData = await sdk.trader.prepareOpenPositionTransaction({
+    pair: 'ETH/USD',
+    side: PositionSide.LONG,
+    size: 1000,
+    leverage: 10,
+    orderType: OrderType.MARKET,
+    slippage: 1
+  });
+
+  // 2. Get user's embedded wallet
+  const user = await privyClient.getUser(userId);
+  const wallet = user.linkedAccounts.find(
+    account => account.type === 'wallet' && account.walletClientType === 'privy'
+  );
+
+  // 3. Send via Privy (gasless!)
+  const result = await privyClient.walletApi.ethereum.sendTransaction({
+    address: wallet.address,
+    chainType: 'ethereum',
+    chainId: 8453, // Base mainnet
+    transaction: {
+      to: txData.to,
+      data: txData.data,
+      value: txData.value
+    }
+  });
+
+  console.log('Gasless transaction:', result.transactionHash);
+}
+```
+
+### Benefits
+
+✅ **No Gas Fees** - Privy sponsors all gas costs
+✅ **No UI Signatures** - Server-side session signers handle everything
+✅ **Simple EOA** - Works with regular wallets, no smart account needed
+✅ **Atomic Bundling** - Fee methods use Multicall3 for single-transaction execution
+✅ **Full Validation** - SDK validates all parameters before encoding
+
+See [INTEGRATION_EXAMPLE.md](INTEGRATION_EXAMPLE.md) for complete backend integration example.
+
 ## 📝 API Reference
 
 ### Main Classes
@@ -579,6 +773,7 @@ await sdk.setSigner({
   - `getPairNameFromAPI(index)` - Get pair name (use instead of deprecated `getPairName()`)
   - `getAllPairsFromAPI()` - Get all pairs (use instead of deprecated `getAllPairs()`)
   - All trading methods now use Socket API for accurate pair indices
+  - **9 new "prepare" methods** for gasless transaction support (see Gasless Transactions section)
 - **`FeedClient`**: Real-time price feeds and market data
 - **`PythClient`**: Pyth Network oracle price data fetching
 - **`SocketAPIClient`**: Socket API for market metadata (89+ pairs)
