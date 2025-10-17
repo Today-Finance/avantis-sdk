@@ -273,13 +273,40 @@ export class TraderClient extends EventEmitter {
 
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.usdc as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: USDCContractABI,
         functionName: "approve",
         args: [this.network.contracts.trading as `0x${string}`, amountUnits],
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.usdc,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "approve",
+          args: [this.network.contracts.trading as `0x${string}`, amountUnits],
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -453,29 +480,14 @@ export class TraderClient extends EventEmitter {
 
       console.log("tradeStruct === ", tradeStruct);
 
-      // Execute transaction with proper execution fee
-      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required
-      // - With Privy gas sponsorship (sponsor: true): Privy sponsors BOTH gas fees AND execution fee
-      // - Without sponsorship: User pays both gas fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee required by Avantis
 
-      console.log("walletClient chain === ", (walletClient as any).chain?.name);
-      console.log(
-        "walletClient transport === ",
-        (walletClient as any).transport?.url
-      );
-
-      // Encode the contract function call manually
-      // This matches Privy's eth_sendTransaction format better than writeContract
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
       });
-
-      console.log("Encoded data === ", data.substring(0, 66) + "...");
 
       let hash: string;
 
@@ -595,20 +607,43 @@ export class TraderClient extends EventEmitter {
         ? toUSDCUnits(collateralToClose)
         : BigInt(0);
 
-      // Execute closeTradeMarket with execution fee
-      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
-      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
-      // - In regular mode: User pays both GAS fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "closeTradeMarket",
         args: [pairIndex, positionIndex, closeAmount],
-        value: BigInt(0), // Always include execution fee
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "closeTradeMarket",
+          args: [pairIndex, positionIndex, closeAmount],
+          value: BigInt(0),
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -684,23 +719,54 @@ export class TraderClient extends EventEmitter {
 
       console.log("priceUpdateData === ", priceUpdateData);
 
-      // Execute updateTpAndSl transaction
-      // Note: Contract expects (pairIndex, index, _newSl, _newTP, priceUpdateData)
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateTpAndSl",
         args: [
           pairIndex,
           positionIndex,
-          stopLossUnits, // Stop loss FIRST
-          takeProfitUnits, // Take profit SECOND
-          priceUpdateData, // Pyth price update data
+          stopLossUnits,
+          takeProfitUnits,
+          priceUpdateData,
         ],
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "updateTpAndSl",
+          args: [
+            pairIndex,
+            positionIndex,
+            stopLossUnits,
+            takeProfitUnits,
+            priceUpdateData,
+          ],
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -940,16 +1006,42 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      // Execute cancelOpenLimitOrder
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "cancelOpenLimitOrder",
         args: [params.pairIndex, params.orderIndex],
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "cancelOpenLimitOrder",
+          args: [params.pairIndex, params.orderIndex],
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -999,11 +1091,10 @@ export class TraderClient extends EventEmitter {
         ? toPriceUnits(params.stopLoss)
         : BigInt(0);
 
-      // Execute updateOpenLimitOrder
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateOpenLimitOrder",
         args: [
@@ -1014,8 +1105,42 @@ export class TraderClient extends EventEmitter {
           tpUnits,
           slUnits,
         ],
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "updateOpenLimitOrder",
+          args: [
+            params.pairIndex,
+            params.orderIndex,
+            priceUnits,
+            slippageUnits,
+            tpUnits,
+            slUnits,
+          ],
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -1701,26 +1826,55 @@ export class TraderClient extends EventEmitter {
         }
       }
 
-      // Execute updateMargin transaction
-      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
-      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
-      // - In regular mode: User pays both GAS fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateMargin",
         args: [
           params.pairIndex,
           params.positionIndex,
-          params.type, // 0 = ADD, 1 = REMOVE
+          params.type,
           amountUnits,
           priceUpdateData,
         ],
-        value: BigInt(0), // Always include execution fee
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "updateMargin",
+          args: [
+            params.pairIndex,
+            params.positionIndex,
+            params.type,
+            amountUnits,
+            priceUpdateData,
+          ],
+          value: BigInt(0),
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -1759,28 +1913,55 @@ export class TraderClient extends EventEmitter {
 
       const priceUpdateData = params.priceUpdateData || [];
 
-      // Calculate execution fee (may need to cover Pyth fee)
-      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
-      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
-      // - In regular mode: User pays both GAS fees and execution fee
-
-      // Execute the limit order
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "executeLimitOrder",
         args: [
-          params.orderType, // LimitOrderType enum
+          params.orderType,
           params.trader as `0x${string}`,
           params.pairIndex,
           params.index,
           priceUpdateData,
         ],
-        value: BigInt(0), // Always include execution fee
-        account,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "executeLimitOrder",
+          args: [
+            params.orderType,
+            params.trader as `0x${string}`,
+            params.pairIndex,
+            params.index,
+            priceUpdateData,
+          ],
+          value: BigInt(0),
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
