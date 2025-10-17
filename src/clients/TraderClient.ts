@@ -493,9 +493,9 @@ export class TraderClient extends EventEmitter {
           caip2: "eip155:8453", // Base mainnet
           sponsor: true, // Enable Privy native gas sponsorship
           transaction: {
-            to: this.network.contracts.trading,
+            to: this.network.contracts.trading as `0x${string}`,
             data,
-            value: `0`, // Convert to hex string
+            value: `0x0`,
           },
         });
 
@@ -507,11 +507,11 @@ export class TraderClient extends EventEmitter {
         );
 
         // Fallback to standard viem sendTransaction
-        // Note: sponsor: true will be ignored if not using Privy RPC
+        // User pays both gas fees and execution fee
         hash = await (walletClient as any).sendTransaction({
           to: this.network.contracts.trading as `0x${string}`,
           data,
-          value: 0,
+          value: 0, // Execution fee required by Avantis (0.00035 ETH)
           account,
         });
       }
