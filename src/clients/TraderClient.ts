@@ -452,7 +452,6 @@ export class TraderClient extends EventEmitter {
       };
 
       console.log("tradeStruct === ", tradeStruct);
-      console.log("slippageUnits === ", slippageUnits);
 
       // Execute transaction with proper execution fee
       // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
@@ -467,6 +466,7 @@ export class TraderClient extends EventEmitter {
         args: [tradeStruct, orderTypeValue, slippageUnits],
         value: BigInt(0), // Always include execution fee
         account,
+        sponsor: true,
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
