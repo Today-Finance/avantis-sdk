@@ -262,6 +262,32 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Prepares a USDC approval transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param amount - Amount to approve (default: 1000000 USDC)
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareApproveTransaction(
+    amount: Decimal | number | string = "1000000"
+  ): Promise<{ to: string; data: string; value: string }> {
+    const amountDecimal = new Decimal(amount);
+    const amountUnits = toUSDCUnits(amountDecimal);
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: USDCContractABI,
+      functionName: "approve",
+      args: [this.network.contracts.trading as `0x${string}`, amountUnits],
+    });
+
+    return {
+      to: this.network.contracts.usdc,
+      data: data as string,
+      value: "0",
+    };
+  }
+
+  /**
    * Approves USDC for trading
    */
   public async approveUSDCForTrading(
@@ -297,6 +323,163 @@ export class TraderClient extends EventEmitter {
     } catch (error) {
       throw handleError(error);
     }
+  }
+
+  /**
+   * Prepares an open position transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as openPosition()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareOpenPositionTransaction(
+    params: OpenPositionParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    // Validate parameters
+    const validated = validate(OpenPositionParamsSchema, params);
+
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Get market configuration
+    const marketConfig = await this.getMarketConfig(params.pair);
+    const pairIndex = marketConfig.pairIndex;
+
+    // Determine order type
+    const orderType = params.orderType || OrderType.MARKET;
+    let orderTypeValue: number;
+    switch (orderType) {
+      case OrderType.MARKET:
+        orderTypeValue = OrderTypeValue.MARKET;
+        break;
+      case OrderType.STOP_LIMIT:
+        orderTypeValue = OrderTypeValue.STOP_LIMIT;
+        break;
+      case OrderType.LIMIT:
+        orderTypeValue = OrderTypeValue.LIMIT;
+        break;
+      case OrderType.MARKET_ZERO_FEE:
+        orderTypeValue = OrderTypeValue.MARKET_ZERO_FEE;
+        break;
+      default:
+        orderTypeValue = OrderTypeValue.MARKET;
+    }
+
+    // Validate openPrice requirements
+    if (
+      (orderType === OrderType.LIMIT || orderType === OrderType.STOP_LIMIT) &&
+      !params.openPrice
+    ) {
+      throw new ValidationError(
+        `Open price is required for ${orderType === OrderType.LIMIT ? "limit" : "stop-limit"} orders`,
+        "openPrice"
+      );
+    }
+
+    // Validate position size
+    const size = validatePositionSize(
+      params.size,
+      marketConfig.minPositionSizeUSDC,
+      marketConfig.maxPositionSizeUSDC.gt(0)
+        ? marketConfig.maxPositionSizeUSDC
+        : new Decimal(1000000)
+    );
+
+    // Validate leverage
+    validateLeverage(params.leverage, marketConfig.maxLeverage);
+
+    // Calculate collateral
+    const collateral = size.div(params.leverage);
+
+    // Check USDC balance
+    const balance = await this.getUSDCBalance();
+    if (balance.lt(collateral)) {
+      throw new TradingError(
+        ErrorCode.INSUFFICIENT_COLLATERAL,
+        `Insufficient USDC balance. Required: ${collateral.toFixed(2)}, Available: ${balance.toFixed(2)}`,
+        params.pair
+      );
+    }
+
+    // Check allowance
+    const allowance = await this.getTradingAllowance();
+    if (allowance.lt(collateral)) {
+      throw new TradingError(
+        ErrorCode.INSUFFICIENT_COLLATERAL,
+        `Insufficient USDC allowance. Please approve USDC for trading.`,
+        params.pair
+      );
+    }
+
+    // Get signer address
+    const address = await this.getAddress();
+
+    // Prepare trade struct
+    const isLong = params.side === PositionSide.LONG;
+    const collateralUnits = toUSDCUnits(collateral);
+    const positionSizeUnits = toUSDCUnits(size);
+    const stopLossUnits = params.stopLoss
+      ? toPriceUnits(params.stopLoss)
+      : BigInt(0);
+    const takeProfitUnits = params.takeProfit
+      ? toPriceUnits(params.takeProfit)
+      : BigInt(0);
+    const slippageUnits = parseUnits(
+      ((params.slippage || 0.5) / 100).toString(),
+      10
+    );
+
+    // Get or fetch open price
+    let openPriceUnits: bigint;
+    if (params.openPrice) {
+      const providedPrice = new Decimal(params.openPrice);
+      openPriceUnits = BigInt(
+        providedPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+      );
+    } else {
+      const priceData = await this.pythClient.getLatestPrice(params.pair);
+      const expo = priceData.expo;
+      const pythPrice = new Decimal(priceData.price.toString());
+      const exponentAdjustment = 10 + expo;
+      openPriceUnits = BigInt(
+        pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0)
+      );
+    }
+
+    const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
+    const positionSizeValue = isZeroFeeOrder
+      ? collateralUnits
+      : positionSizeUnits;
+
+    const tradeStruct = {
+      trader: address,
+      pairIndex: pairIndex,
+      index: 0,
+      initialPosToken: 0,
+      positionSizeUSDC: positionSizeValue,
+      openPrice: openPriceUnits,
+      buy: isLong,
+      leverage: toLeverageUnits(params.leverage),
+      tp: takeProfitUnits,
+      sl: stopLossUnits,
+      timestamp: 0,
+    };
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "openTrade",
+      args: [tradeStruct, orderTypeValue, slippageUnits],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
   }
 
   /**
@@ -511,6 +694,57 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Prepares a close position transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as closePosition()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareClosePositionTransaction(
+    params: ClosePositionParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    // Validate parameters
+    const validated = validate(ClosePositionParamsSchema, params);
+
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Parse position ID
+    const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
+    if (!pairIndexStr || !positionIndexStr) {
+      throw new ValidationError(
+        'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
+        "positionId"
+      );
+    }
+
+    const pairIndex = parseInt(pairIndexStr);
+    const positionIndex = parseInt(positionIndexStr);
+
+    // Determine close amount
+    const collateralToClose = params.collateralAmount || params.size;
+    const closeAmount = collateralToClose
+      ? toUSDCUnits(collateralToClose)
+      : BigInt(0);
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "closeTradeMarket",
+      args: [pairIndex, positionIndex, closeAmount],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
+  }
+
+  /**
    * Closes an existing position
    */
   public async closePosition(
@@ -579,6 +813,82 @@ export class TraderClient extends EventEmitter {
     } catch (error) {
       throw handleError(error);
     }
+  }
+
+  /**
+   * Prepares an update position (TP/SL) transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as updatePosition()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareUpdatePositionTransaction(
+    params: UpdatePositionParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    // Validate parameters
+    const validated = validate(UpdatePositionParamsSchema, params);
+
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Parse position ID
+    const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
+    if (!pairIndexStr || !positionIndexStr) {
+      throw new ValidationError(
+        'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
+        "positionId"
+      );
+    }
+
+    const pairIndex = parseInt(pairIndexStr);
+    const positionIndex = parseInt(positionIndexStr);
+
+    const stopLossUnits = params.stopLoss
+      ? toPriceUnits(params.stopLoss)
+      : BigInt(0);
+    const takeProfitUnits = params.takeProfit
+      ? toPriceUnits(params.takeProfit)
+      : BigInt(0);
+
+    // Get pair name from Socket API for Pyth price data
+    const pairName = await this.getPairNameFromAPI(pairIndex);
+
+    // Get Pyth price update data
+    const autofetch = params.autofetchPrices !== false;
+    let priceUpdateData: string[] = params.priceUpdateData || [];
+
+    if (autofetch && priceUpdateData.length === 0) {
+      try {
+        priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
+      } catch (error) {
+        console.warn(
+          `Failed to fetch Pyth price data for ${pairName}:`,
+          error
+        );
+      }
+    }
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "updateTpAndSl",
+      args: [
+        pairIndex,
+        positionIndex,
+        stopLossUnits,
+        takeProfitUnits,
+        priceUpdateData,
+      ],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
   }
 
   /**
