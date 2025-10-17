@@ -1190,6 +1190,36 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Prepares a cancel limit order transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as cancelLimitOrder()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareCancelLimitOrderTransaction(
+    params: CancelLimitOrderParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "cancelOpenLimitOrder",
+      args: [params.pairIndex, params.orderIndex],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
+  }
+
+  /**
    * Cancels a pending limit order
    */
   public async cancelLimitOrder(
@@ -1234,6 +1264,55 @@ export class TraderClient extends EventEmitter {
     } catch (error) {
       throw handleError(error);
     }
+  }
+
+  /**
+   * Prepares an update limit order transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as updateLimitOrder()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareUpdateLimitOrderTransaction(
+    params: UpdateLimitOrderParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    const priceUnits = toPriceUnits(params.price);
+    const slippageUnits = parseUnits(
+      ((params.slippage || 0.5) / 100).toString(),
+      10
+    );
+    const tpUnits = params.takeProfit
+      ? toPriceUnits(params.takeProfit)
+      : BigInt(0);
+    const slUnits = params.stopLoss
+      ? toPriceUnits(params.stopLoss)
+      : BigInt(0);
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "updateOpenLimitOrder",
+      args: [
+        params.pairIndex,
+        params.orderIndex,
+        priceUnits,
+        slippageUnits,
+        tpUnits,
+        slUnits,
+      ],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
   }
 
   /**
@@ -1540,6 +1619,216 @@ export class TraderClient extends EventEmitter {
     }
 
     return this.feeManager.calculateFeeBreakdown(tradeSize, params);
+  }
+
+  /**
+   * Prepares an open position with fees transaction WITHOUT executing it
+   * Uses Multicall3 to bundle fee transfers and trade execution into a single atomic transaction
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as openPositionWithFees()
+   * @returns Single Multicall3 transaction bundling all operations
+   */
+  public async prepareOpenPositionWithFeesTransaction(
+    params: OpenPositionParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    // Check if fees are enabled
+    if (
+      !this.feeManager ||
+      !this.feeManager.isEnabled() ||
+      !params.platformFee?.enabled
+    ) {
+      // Fall back to regular openPosition if fees not enabled
+      return await this.prepareOpenPositionTransaction(params);
+    }
+
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Validate parameters
+    const validated = validate(OpenPositionParamsSchema, params);
+
+    // Get market configuration
+    const marketConfig = await this.getMarketConfig(params.pair);
+    const pairIndex = marketConfig.pairIndex;
+
+    // Validate position size and leverage
+    const size = validatePositionSize(
+      params.size,
+      marketConfig.minPositionSizeUSDC,
+      marketConfig.maxPositionSizeUSDC.gt(0)
+        ? marketConfig.maxPositionSizeUSDC
+        : new Decimal(1000000)
+    );
+    validateLeverage(params.leverage, marketConfig.maxLeverage);
+
+    // Calculate collateral
+    const collateral = size.div(params.leverage);
+
+    // Calculate platform fees
+    const feeBreakdown = this.feeManager.calculateFeeBreakdown(
+      size,
+      params.platformFee
+    );
+
+    // Build trade struct
+    const address = await this.getAddress();
+    const isLong = params.side === PositionSide.LONG;
+    const orderType = params.orderType || OrderType.MARKET;
+    let orderTypeValue: number;
+    switch (orderType) {
+      case OrderType.MARKET:
+        orderTypeValue = OrderTypeValue.MARKET;
+        break;
+      case OrderType.STOP_LIMIT:
+        orderTypeValue = OrderTypeValue.STOP_LIMIT;
+        break;
+      case OrderType.LIMIT:
+        orderTypeValue = OrderTypeValue.LIMIT;
+        break;
+      case OrderType.MARKET_ZERO_FEE:
+        orderTypeValue = OrderTypeValue.MARKET_ZERO_FEE;
+        break;
+      default:
+        orderTypeValue = OrderTypeValue.MARKET;
+    }
+
+    // Validate openPrice requirements
+    if (
+      (orderType === OrderType.LIMIT || orderType === OrderType.STOP_LIMIT) &&
+      !params.openPrice
+    ) {
+      throw new ValidationError(
+        `Open price is required for ${orderType === OrderType.LIMIT ? "limit" : "stop-limit"} orders`,
+        "openPrice"
+      );
+    }
+
+    // Get or fetch open price
+    let openPriceUnits: bigint;
+    if (params.openPrice) {
+      const providedPrice = new Decimal(params.openPrice);
+      openPriceUnits = BigInt(
+        providedPrice.mul(new Decimal(10).pow(10)).toFixed(0)
+      );
+    } else {
+      const priceData = await this.pythClient.getLatestPrice(params.pair);
+      const expo = priceData.expo;
+      const pythPrice = new Decimal(priceData.price.toString());
+      const exponentAdjustment = 10 + expo;
+      openPriceUnits = BigInt(
+        pythPrice.mul(new Decimal(10).pow(exponentAdjustment)).toFixed(0)
+      );
+    }
+
+    const collateralUnits = toUSDCUnits(collateral);
+    const positionSizeUnits = toUSDCUnits(size);
+    const stopLossUnits = params.stopLoss
+      ? toPriceUnits(params.stopLoss)
+      : BigInt(0);
+    const takeProfitUnits = params.takeProfit
+      ? toPriceUnits(params.takeProfit)
+      : BigInt(0);
+    const slippageUnits = parseUnits(
+      ((params.slippage || 0.5) / 100).toString(),
+      10
+    );
+
+    const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
+    const positionSizeValue = isZeroFeeOrder
+      ? collateralUnits
+      : positionSizeUnits;
+
+    const tradeStruct = {
+      trader: address,
+      pairIndex: pairIndex,
+      index: 0,
+      initialPosToken: 0,
+      positionSizeUSDC: positionSizeValue,
+      openPrice: openPriceUnits,
+      buy: isLong,
+      leverage: toLeverageUnits(params.leverage),
+      tp: takeProfitUnits,
+      sl: stopLossUnits,
+      timestamp: 0,
+    };
+
+    // Build Multicall3 calls array
+    const calls: Array<{
+      target: string;
+      allowFailure: boolean;
+      callData: string;
+    }> = [];
+
+    const feeConfig = this.feeManager.getConfig();
+
+    // 1. Platform fee transfer
+    if (feeBreakdown.platformReceives.gt(0)) {
+      const platformFeeData = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "transfer",
+        args: [
+          feeConfig.platformWallet as `0x${string}`,
+          toUSDCUnits(feeBreakdown.platformReceives),
+        ],
+      });
+
+      calls.push({
+        target: this.network.contracts.usdc,
+        allowFailure: false,
+        callData: platformFeeData as string,
+      });
+    }
+
+    // 2. Referral fee transfer (if applicable)
+    if (
+      params.platformFee.referralAddress &&
+      feeBreakdown.referralFee.gt(0)
+    ) {
+      const referralFeeData = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "transfer",
+        args: [
+          params.platformFee.referralAddress as `0x${string}`,
+          toUSDCUnits(feeBreakdown.referralFee),
+        ],
+      });
+
+      calls.push({
+        target: this.network.contracts.usdc,
+        allowFailure: false,
+        callData: referralFeeData as string,
+      });
+    }
+
+    // 3. Open trade call
+    const openTradeData = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "openTrade",
+      args: [tradeStruct, orderTypeValue, slippageUnits],
+    });
+
+    calls.push({
+      target: this.network.contracts.trading,
+      allowFailure: false,
+      callData: openTradeData as string,
+    });
+
+    // Bundle into Multicall3 transaction
+    const multicallData = encodeFunctionData({
+      abi: Multicall3ContractABI,
+      functionName: "aggregate3",
+      args: [calls],
+    });
+
+    return {
+      to: "0xcA11bde05977b3631167028862bE2a173976CA11", // Multicall3 canonical address
+      data: multicallData as string,
+      value: "0",
+    };
   }
 
   /**
@@ -1928,6 +2217,193 @@ export class TraderClient extends EventEmitter {
     } catch (error) {
       throw handleError(error);
     }
+  }
+
+  /**
+   * Prepares a close position with fees transaction WITHOUT executing it
+   * Uses Multicall3 to atomically bundle: fee transfers + close trade
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as closePositionWithFees()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareClosePositionWithFeesTransaction(
+    params: ClosePositionParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    // Check if fees are enabled
+    if (
+      !this.feeManager ||
+      !this.feeManager.isEnabled() ||
+      !params.platformFee?.enabled
+    ) {
+      // Fall back to regular prepareClosePositionTransaction if fees not enabled
+      return await this.prepareClosePositionTransaction(params);
+    }
+
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    // Validate parameters
+    const validated = validate(ClosePositionParamsSchema, params);
+
+    // Parse position ID
+    const [pairIndexStr, positionIndexStr] = params.positionId.split("-");
+    if (!pairIndexStr || !positionIndexStr) {
+      throw new ValidationError(
+        'Invalid position ID format. Expected format: "pairIndex-positionIndex"',
+        "positionId"
+      );
+    }
+
+    const pairIndex = parseInt(pairIndexStr);
+    const positionIndex = parseInt(positionIndexStr);
+
+    // Determine close amount (collateralAmount takes priority over size)
+    const collateralToClose = params.collateralAmount || params.size;
+    const closeAmount = collateralToClose
+      ? toUSDCUnits(collateralToClose)
+      : BigInt(0);
+
+    // Calculate platform fees on the closing size
+    const closeSize = collateralToClose || new Decimal(100); // Default placeholder
+    const feeBreakdown = this.feeManager.calculateFeeBreakdown(
+      closeSize,
+      params.platformFee
+    );
+
+    // Get fee configuration
+    const feeConfig = this.feeManager.getConfig();
+
+    // Build Multicall3 calls array
+    const calls: Array<{
+      target: string;
+      allowFailure: boolean;
+      callData: string;
+    }> = [];
+
+    // 1. Platform fee transfer (if amount > 0)
+    if (feeBreakdown.platformReceives.gt(0)) {
+      const platformFeeData = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "transfer",
+        args: [
+          feeConfig.platformWallet as `0x${string}`,
+          toUSDCUnits(feeBreakdown.platformReceives),
+        ],
+      });
+
+      calls.push({
+        target: this.network.contracts.usdc,
+        allowFailure: false,
+        callData: platformFeeData as string,
+      });
+    }
+
+    // 2. Referral fee transfer (if referral address exists and amount > 0)
+    if (
+      params.platformFee.referralAddress &&
+      feeBreakdown.referralFee.gt(0)
+    ) {
+      const referralFeeData = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "transfer",
+        args: [
+          params.platformFee.referralAddress as `0x${string}`,
+          toUSDCUnits(feeBreakdown.referralFee),
+        ],
+      });
+
+      calls.push({
+        target: this.network.contracts.usdc,
+        allowFailure: false,
+        callData: referralFeeData as string,
+      });
+    }
+
+    // 3. Close trade transaction
+    const closeTradeData = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "closeTradeMarket",
+      args: [pairIndex, positionIndex, closeAmount],
+    });
+
+    calls.push({
+      target: this.network.contracts.trading,
+      allowFailure: false,
+      callData: closeTradeData as string,
+    });
+
+    // Bundle into Multicall3 transaction
+    const multicallData = encodeFunctionData({
+      abi: Multicall3ContractABI,
+      functionName: "aggregate3",
+      args: [calls],
+    });
+
+    return {
+      to: "0xcA11bde05977b3631167028862bE2a173976CA11", // Multicall3 canonical address
+      data: multicallData as string,
+      value: "0",
+    };
+  }
+
+  /**
+   * Prepares an update margin transaction WITHOUT executing it
+   * Returns transaction data that can be sent via custom infrastructure (e.g., Privy Wallet API)
+   * @param params - Same params as updateMargin()
+   * @returns Transaction data { to, data, value }
+   */
+  public async prepareUpdateMarginTransaction(
+    params: UpdateMarginParams
+  ): Promise<{ to: string; data: string; value: string }> {
+    if (!this.tradingContract) {
+      throw new TradingError(
+        ErrorCode.CONTRACT_NOT_FOUND,
+        "Trading contract not deployed on this network"
+      );
+    }
+
+    const amountUnits = toUSDCUnits(params.amount);
+
+    // Get pair name from Socket API for Pyth price data
+    const pairName = await this.getPairNameFromAPI(params.pairIndex);
+
+    // Get Pyth price update data
+    const autofetch = params.autofetchPrices !== false;
+    let priceUpdateData: string[] = params.priceUpdateData || [];
+
+    if (autofetch && priceUpdateData.length === 0) {
+      try {
+        priceUpdateData = await this.pythClient.getPriceUpdateData(pairName);
+      } catch (error) {
+        console.warn(
+          `Failed to fetch Pyth price data for ${pairName}:`,
+          error
+        );
+      }
+    }
+
+    // Encode function call data
+    const data = encodeFunctionData({
+      abi: TradingContractABI,
+      functionName: "updateMargin",
+      args: [
+        params.pairIndex,
+        params.positionIndex,
+        params.type,
+        amountUnits,
+        priceUpdateData,
+      ],
+    });
+
+    return {
+      to: this.network.contracts.trading,
+      data: data as string,
+      value: "0",
+    };
   }
 
   /**
