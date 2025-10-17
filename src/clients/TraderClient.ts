@@ -454,19 +454,38 @@ export class TraderClient extends EventEmitter {
       console.log("tradeStruct === ", tradeStruct);
 
       // Execute transaction with proper execution fee
-      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required, even in gasless mode
-      // - In gasless mode: Paymaster sponsors GAS fees, but smart account pays execution fee
-      // - In regular mode: User pays both GAS fees and execution fee
+      // NOTE: Execution fee (0.00035 ETH) is ALWAYS required
+      // - With Privy gas sponsorship (sponsor: true): Privy sponsors BOTH gas fees AND execution fee
+      // - Without sponsorship: User pays both gas fees and execution fee
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee required by Avantis
+
+      console.log("walletClient chain === ", (walletClient as any).chain?.name);
+      console.log(
+        "walletClient transport === ",
+        (walletClient as any).transport?.url
+      );
+
+      // Encode the contract function call manually
+      // This matches Privy's eth_sendTransaction format better than writeContract
+      const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
-        value: BigInt(0), // Always include execution fee
+      });
+
+      console.log("Encoded data === ", data.substring(0, 66) + "...");
+      console.log("Sending transaction with sponsor: true...");
+
+      // Use sendTransaction instead of writeContract for better Privy compatibility
+      // This matches Privy's eth_sendTransaction RPC method
+      const hash = await (walletClient as any).sendTransaction({
+        to: this.network.contracts.trading as `0x${string}`,
+        data,
+        value: 0, // Execution fee (Privy will sponsor this when sponsor: true)
         account,
-        sponsor: true,
+        sponsor: true, // Privy native gas sponsorship covers gas + value
       });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
