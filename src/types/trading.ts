@@ -43,6 +43,7 @@ export interface TradingPair {
 }
 
 export interface OpenPositionParams {
+  eoaAddress: string;
   pair: string;
   side: PositionSide;
   size: Decimal | number | string;

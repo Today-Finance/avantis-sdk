@@ -389,7 +389,7 @@ export class TraderClient extends EventEmitter {
       }
 
       // Get signer address
-      const address = await this.getAddress();
+      // const address = await this.getAddress();
 
       // Prepare trade struct for contract
       const isLong = params.side === PositionSide.LONG;
@@ -438,7 +438,7 @@ export class TraderClient extends EventEmitter {
         : positionSizeUnits;
 
       const tradeStruct = {
-        trader: address,
+        trader: params.eoaAddress,
         pairIndex: pairIndex,
         index: 0, // This will be assigned by the contract
         initialPosToken: 0, // Always 0 for new positions
