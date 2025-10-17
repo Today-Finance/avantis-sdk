@@ -43,6 +43,8 @@ export class BlockchainProvider {
   private walletClient?: WalletClient;
   private account?: Account;
   private network: NetworkConfig;
+  private privyClient?: any; // Privy SDK client for native gas sponsorship
+  private privyWalletId?: string; // Privy wallet ID for API calls
   private readonly config: {
     confirmations: number;
     timeout: number;
@@ -155,6 +157,46 @@ export class BlockchainProvider {
           );
           break;
 
+        case "privyClient":
+          // Handle Privy SDK client for native gas sponsorship
+          if (!config.privyClient) {
+            throw new ValidationError(
+              "Privy client is required for privyClient type"
+            );
+          }
+          if (!config.privyWalletId) {
+            throw new ValidationError(
+              "Privy wallet ID is required for privyClient type"
+            );
+          }
+
+          // Store Privy client and wallet ID
+          this.privyClient = config.privyClient;
+          this.privyWalletId = config.privyWalletId;
+
+          // Still need a viem client for read operations
+          // Get the wallet address from Privy client
+          if (config.client) {
+            this.walletClient = config.client;
+            if (config.client.account) {
+              this.account = config.client.account;
+            } else {
+              throw new ValidationError("Client must have an account");
+            }
+          } else {
+            throw new ValidationError(
+              "Viem client is also required for privyClient type (for read operations)"
+            );
+          }
+
+          console.log(
+            "[BlockchainProvider] Set Privy client with wallet ID:",
+            this.privyWalletId,
+            "address:",
+            this.account.address
+          );
+          break;
+
         default:
           throw new ValidationError("Invalid signer type");
       }
@@ -195,6 +237,27 @@ export class BlockchainProvider {
    */
   public getNetwork(): NetworkConfig {
     return this.network;
+  }
+
+  /**
+   * Gets the Privy client (if configured)
+   */
+  public getPrivyClient(): any | undefined {
+    return this.privyClient;
+  }
+
+  /**
+   * Gets the Privy wallet ID (if configured)
+   */
+  public getPrivyWalletId(): string | undefined {
+    return this.privyWalletId;
+  }
+
+  /**
+   * Checks if Privy client is configured
+   */
+  public hasPrivyClient(): boolean {
+    return !!this.privyClient && !!this.privyWalletId;
   }
 
   /**

@@ -42,12 +42,20 @@ export interface NetworkConfig {
 }
 
 export interface SignerConfig {
-  type: "privateKey" | "mnemonic" | "jsonRpc" | "injected" | "viemClient";
+  type:
+    | "privateKey"
+    | "mnemonic"
+    | "jsonRpc"
+    | "injected"
+    | "viemClient"
+    | "privyClient";
   privateKey?: string;
   mnemonic?: string;
   path?: string;
   provider?: any; // For injected providers (MetaMask, etc.)
   client?: WalletClient; // For viem WalletClient (like kernel client)
+  privyClient?: any; // For Privy SDK client with native gas sponsorship
+  privyWalletId?: string; // Privy wallet ID for API calls
 }
 
 export interface TransactionConfig {

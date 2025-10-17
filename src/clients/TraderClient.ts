@@ -476,17 +476,45 @@ export class TraderClient extends EventEmitter {
       });
 
       console.log("Encoded data === ", data.substring(0, 66) + "...");
-      console.log("Sending transaction with sponsor: true...");
 
-      // Use sendTransaction instead of writeContract for better Privy compatibility
-      // This matches Privy's eth_sendTransaction RPC method
-      const hash = await (walletClient as any).sendTransaction({
-        to: this.network.contracts.trading as `0x${string}`,
-        data,
-        value: 0, // Execution fee (Privy will sponsor this when sponsor: true)
-        account,
-        sponsor: true, // Privy native gas sponsorship covers gas + value
-      });
+      let hash: string;
+
+      // Check if we have Privy client configured for native gas sponsorship
+      if (this.blockchain.hasPrivyClient()) {
+        console.log("Using Privy native gas sponsorship...");
+
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        // Use Privy's walletApi.ethereum.sendTransaction with sponsor: true
+        // This properly routes through Privy's infrastructure for gas sponsorship
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453", // Base mainnet
+          sponsor: true, // Enable Privy native gas sponsorship
+          transaction: {
+            to: this.network.contracts.trading,
+            data,
+            value: `0`, // Convert to hex string
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+        console.log("Privy transaction submitted:", hash);
+      } else {
+        console.log(
+          "Using standard viem sendTransaction (no gas sponsorship)..."
+        );
+
+        // Fallback to standard viem sendTransaction
+        // Note: sponsor: true will be ignored if not using Privy RPC
+        hash = await (walletClient as any).sendTransaction({
+          to: this.network.contracts.trading as `0x${string}`,
+          data,
+          value: 0,
+          account,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
