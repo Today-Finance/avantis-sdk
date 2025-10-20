@@ -523,7 +523,7 @@ export class TraderClient extends EventEmitter {
         hash = await (walletClient as any).sendTransaction({
           to: this.network.contracts.trading as `0x${string}`,
           data,
-          value: 0, // Execution fee required by Avantis (0.00035 ETH)
+          value: 0, // Execution fee required by Avantis (0 ETH)
           account,
         });
       }
@@ -1564,7 +1564,7 @@ export class TraderClient extends EventEmitter {
         ((params.slippage || 0.5) / 100).toString(),
         10
       );
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0"); // 0 ETH execution fee (per Avantis docs)
 
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
@@ -1826,7 +1826,7 @@ export class TraderClient extends EventEmitter {
 
       // Bundle the transaction
       const feeConfig = this.feeManager.getConfig();
-      const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
+      const executionFee = parseEther("0"); // 0 ETH execution fee (per Avantis docs)
 
       // Execute close and fee transfers separately (Multicall3 won't work for transfers with smart accounts)
       const walletClient = this.blockchain.getSigner();
