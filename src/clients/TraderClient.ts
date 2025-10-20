@@ -1602,17 +1602,50 @@ export class TraderClient extends EventEmitter {
         console.log(
           `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC (nonce: ${currentNonce})`
         );
-        const platformFeeHash = await (walletClient as any).writeContract({
-          address: this.network.contracts.usdc as `0x${string}`,
+
+        const platformFeeData = encodeFunctionData({
           abi: USDCContractABI,
           functionName: "transfer",
           args: [
             feeConfig.platformWallet as `0x${string}`,
             toUSDCUnits(feeBreakdown.platformReceives),
           ],
-          account,
-          nonce: currentNonce,
         });
+
+        let platformFeeHash: string;
+
+        if (this.blockchain.hasPrivyClient()) {
+          const privyClient = this.blockchain.getPrivyClient();
+          const privyWalletId = this.blockchain.getPrivyWalletId();
+
+          const response = await privyClient.walletApi.ethereum.sendTransaction(
+            {
+              walletId: privyWalletId,
+              caip2: "eip155:8453",
+              sponsor: true,
+              transaction: {
+                to: this.network.contracts.usdc,
+                data: platformFeeData,
+                value: "0x0",
+              },
+            }
+          );
+
+          platformFeeHash = response.hash || response.transactionHash;
+        } else {
+          platformFeeHash = await (walletClient as any).writeContract({
+            address: this.network.contracts.usdc as `0x${string}`,
+            abi: USDCContractABI,
+            functionName: "transfer",
+            args: [
+              feeConfig.platformWallet as `0x${string}`,
+              toUSDCUnits(feeBreakdown.platformReceives),
+            ],
+            account,
+            nonce: currentNonce,
+          });
+        }
+
         await this.blockchain.waitForTransaction(platformFeeHash);
         currentNonce++; // Increment nonce for next transaction
       }
@@ -1625,32 +1658,92 @@ export class TraderClient extends EventEmitter {
         console.log(
           `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC (nonce: ${currentNonce})`
         );
-        const referralFeeHash = await (walletClient as any).writeContract({
-          address: this.network.contracts.usdc as `0x${string}`,
+
+        const referralFeeData = encodeFunctionData({
           abi: USDCContractABI,
           functionName: "transfer",
           args: [
             params.platformFee.referralAddress as `0x${string}`,
             toUSDCUnits(feeBreakdown.referralFee),
           ],
-          account,
-          nonce: currentNonce,
         });
+
+        let referralFeeHash: string;
+
+        if (this.blockchain.hasPrivyClient()) {
+          const privyClient = this.blockchain.getPrivyClient();
+          const privyWalletId = this.blockchain.getPrivyWalletId();
+
+          const response = await privyClient.walletApi.ethereum.sendTransaction(
+            {
+              walletId: privyWalletId,
+              caip2: "eip155:8453",
+              sponsor: true,
+              transaction: {
+                to: this.network.contracts.usdc,
+                data: referralFeeData,
+                value: "0x0",
+              },
+            }
+          );
+
+          referralFeeHash = response.hash || response.transactionHash;
+        } else {
+          referralFeeHash = await (walletClient as any).writeContract({
+            address: this.network.contracts.usdc as `0x${string}`,
+            abi: USDCContractABI,
+            functionName: "transfer",
+            args: [
+              params.platformFee.referralAddress as `0x${string}`,
+              toUSDCUnits(feeBreakdown.referralFee),
+            ],
+            account,
+            nonce: currentNonce,
+          });
+        }
+
         await this.blockchain.waitForTransaction(referralFeeHash);
         currentNonce++; // Increment nonce for next transaction
       }
 
       // Step 3: Execute the trade
       console.log(`Executing trade on Avantis... (nonce: ${currentNonce})`);
-      const hash = await (walletClient as any).writeContract({
-        address: this.network.contracts.trading as `0x${string}`,
+
+      const tradeData = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
-        value: 0, // Execution fee in ETH (0.00035 ETH - REQUIRED)
-        account,
-        nonce: currentNonce,
       });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.trading,
+            data: tradeData,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.trading as `0x${string}`,
+          abi: TradingContractABI,
+          functionName: "openTrade",
+          args: [tradeStruct, orderTypeValue, slippageUnits],
+          value: 0,
+          account,
+          nonce: currentNonce,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -1764,13 +1857,34 @@ export class TraderClient extends EventEmitter {
       console.log(
         `Executing bundled close transaction (nonce: ${currentNonce})...`
       );
-      const hash = await (walletClient as any).sendTransaction({
-        to: bundled.to as `0x${string}`,
-        data: bundled.data as `0x${string}`,
-        value: 0, // Execution fee (0.00035 ETH)
-        account,
-        nonce: currentNonce,
-      });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: bundled.to,
+            data: bundled.data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        hash = await (walletClient as any).sendTransaction({
+          to: bundled.to as `0x${string}`,
+          data: bundled.data as `0x${string}`,
+          value: 0,
+          account,
+          nonce: currentNonce,
+        });
+      }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
