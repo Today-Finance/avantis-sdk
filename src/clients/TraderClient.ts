@@ -1728,7 +1728,7 @@ export class TraderClient extends EventEmitter {
           transaction: {
             to: this.network.contracts.trading,
             data: tradeData,
-            value: "0x0",
+            value: `0x${executionFee.toString(16)}`,
           },
         });
 
@@ -1739,7 +1739,7 @@ export class TraderClient extends EventEmitter {
           abi: TradingContractABI,
           functionName: "openTrade",
           args: [tradeStruct, orderTypeValue, slippageUnits],
-          value: 0,
+          value: executionFee,
           account,
           nonce: currentNonce,
         });
@@ -1828,35 +1828,25 @@ export class TraderClient extends EventEmitter {
       const feeConfig = this.feeManager.getConfig();
       const executionFee = parseEther("0.00035"); // 0.00035 ETH execution fee (per Avantis docs)
 
-      const bundled = this.multicallBundler.bundleCloseWithFees({
-        usdcAddress: this.network.contracts.usdc,
-        tradingAddress: this.network.contracts.trading,
-        platformWallet: feeConfig.platformWallet,
-        referralAddress: params.platformFee.referralAddress,
-        platformFeeAmount: toUSDCUnits(feeBreakdown.platformReceives),
-        referralFeeAmount: params.platformFee.referralAddress
-          ? toUSDCUnits(feeBreakdown.referralFee)
-          : undefined,
-        pairIndex,
-        positionIndex,
-        closeAmount,
-        executionFee,
-      });
-
-      // Execute bundled transaction
+      // Execute close and fee transfers separately (Multicall3 won't work for transfers with smart accounts)
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
       const publicClient = this.blockchain.getProvider();
 
       // Fetch the current nonce to avoid nonce conflicts
-      const currentNonce = await publicClient.getTransactionCount({
+      let currentNonce = await publicClient.getTransactionCount({
         address: account.address,
         blockTag: "pending",
       });
 
-      console.log(
-        `Executing bundled close transaction (nonce: ${currentNonce})...`
-      );
+      // Step 1: Close the position first
+      console.log(`Closing position ${params.positionId} (nonce: ${currentNonce})...`);
+
+      const closeTradeData = encodeFunctionData({
+        abi: TradingContractABI,
+        functionName: "closeTradeMarket",
+        args: [BigInt(pairIndex), BigInt(positionIndex), closeAmount],
+      });
 
       let hash: string;
 
@@ -1869,30 +1859,128 @@ export class TraderClient extends EventEmitter {
           caip2: "eip155:8453",
           sponsor: true,
           transaction: {
-            to: bundled.to,
-            data: bundled.data,
-            value: "0x0",
+            to: this.network.contracts.trading,
+            data: closeTradeData,
+            value: `0x${executionFee.toString(16)}`,
           },
         });
 
         hash = response.hash || response.transactionHash;
       } else {
         hash = await (walletClient as any).sendTransaction({
-          to: bundled.to as `0x${string}`,
-          data: bundled.data as `0x${string}`,
-          value: 0,
+          to: this.network.contracts.trading as `0x${string}`,
+          data: closeTradeData as `0x${string}`,
+          value: executionFee,
           account,
           nonce: currentNonce,
         });
       }
 
       const receipt = await this.blockchain.waitForTransaction(hash);
+      currentNonce++; // Increment nonce for next transaction
+
+      console.log(`✅ Position closed! TX: ${receipt.transactionHash}`);
+
+      // Step 2: Transfer platform fee (from returned collateral in smart account)
+      if (feeBreakdown.platformReceives.gt(0)) {
+        console.log(
+          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC (nonce: ${currentNonce})`
+        );
+
+        const platformFeeData = encodeFunctionData({
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            feeConfig.platformWallet as `0x${string}`,
+            toUSDCUnits(feeBreakdown.platformReceives),
+          ],
+        });
+
+        let platformFeeHash: string;
+
+        if (this.blockchain.hasPrivyClient()) {
+          const privyClient = this.blockchain.getPrivyClient();
+          const privyWalletId = this.blockchain.getPrivyWalletId();
+
+          const response = await privyClient.walletApi.ethereum.sendTransaction({
+            walletId: privyWalletId,
+            caip2: "eip155:8453",
+            sponsor: true,
+            transaction: {
+              to: this.network.contracts.usdc,
+              data: platformFeeData,
+              value: "0x0",
+            },
+          });
+
+          platformFeeHash = response.hash || response.transactionHash;
+        } else {
+          platformFeeHash = await (walletClient as any).sendTransaction({
+            to: this.network.contracts.usdc as `0x${string}`,
+            data: platformFeeData as `0x${string}`,
+            value: 0n,
+            account,
+            nonce: currentNonce,
+          });
+        }
+
+        await this.blockchain.waitForTransaction(platformFeeHash);
+        currentNonce++; // Increment nonce for next transaction
+      }
+
+      // Step 3: Transfer referral fee (if applicable)
+      if (
+        params.platformFee.referralAddress &&
+        feeBreakdown.referralFee.gt(0)
+      ) {
+        console.log(
+          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC (nonce: ${currentNonce})`
+        );
+
+        const referralFeeData = encodeFunctionData({
+          abi: USDCContractABI,
+          functionName: "transfer",
+          args: [
+            params.platformFee.referralAddress as `0x${string}`,
+            toUSDCUnits(feeBreakdown.referralFee),
+          ],
+        });
+
+        let referralFeeHash: string;
+
+        if (this.blockchain.hasPrivyClient()) {
+          const privyClient = this.blockchain.getPrivyClient();
+          const privyWalletId = this.blockchain.getPrivyWalletId();
+
+          const response = await privyClient.walletApi.ethereum.sendTransaction({
+            walletId: privyWalletId,
+            caip2: "eip155:8453",
+            sponsor: true,
+            transaction: {
+              to: this.network.contracts.usdc,
+              data: referralFeeData,
+              value: "0x0",
+            },
+          });
+
+          referralFeeHash = response.hash || response.transactionHash;
+        } else {
+          referralFeeHash = await (walletClient as any).sendTransaction({
+            to: this.network.contracts.usdc as `0x${string}`,
+            data: referralFeeData as `0x${string}`,
+            value: 0n,
+            account,
+            nonce: currentNonce,
+          });
+        }
+
+        await this.blockchain.waitForTransaction(referralFeeHash);
+      }
 
       this.emit("positionClosedWithFees", {
         positionId: params.positionId,
         transactionHash: receipt.transactionHash,
         feeBreakdown,
-        bundledOperations: bundled.description,
       });
 
       return {
