@@ -1612,6 +1612,8 @@ export class TraderClient extends EventEmitter {
           ],
         });
 
+        console.log("hasPrivyClient === ", this.blockchain.hasPrivyClient());
+
         let platformFeeHash: string;
 
         if (this.blockchain.hasPrivyClient()) {
@@ -1631,7 +1633,11 @@ export class TraderClient extends EventEmitter {
             }
           );
 
+          console.log("response === ", response);
+
           platformFeeHash = response.hash || response.transactionHash;
+
+          console.log("platformFeeHash === ", platformFeeHash);
         } else {
           platformFeeHash = await (walletClient as any).writeContract({
             address: this.network.contracts.usdc as `0x${string}`,
