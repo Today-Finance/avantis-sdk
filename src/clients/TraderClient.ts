@@ -327,6 +327,80 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Approves maximum USDC for trading (one-time approval for unlimited trading)
+   * This approves the maximum uint256 value, so you never need to approve again
+   */
+  public async approveMaxUSDC(): Promise<TradeResponse> {
+    try {
+      const walletClient = this.blockchain.getSigner();
+      const account = this.blockchain.getAccount();
+
+      // Use max uint256 value for unlimited approval
+      const maxUint256 = BigInt(
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      );
+
+      const data = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "approve",
+        args: [this.network.contracts.trading as `0x${string}`, maxUint256],
+      });
+
+      let hash: string;
+
+      if (this.blockchain.hasPrivyClient()) {
+        const privyClient = this.blockchain.getPrivyClient();
+        const privyWalletId = this.blockchain.getPrivyWalletId();
+
+        console.log("Approving max USDC with Privy gas sponsorship...");
+
+        const response = await privyClient.walletApi.ethereum.sendTransaction({
+          walletId: privyWalletId,
+          caip2: "eip155:8453",
+          sponsor: true,
+          transaction: {
+            to: this.network.contracts.usdc,
+            data,
+            value: "0x0",
+          },
+        });
+
+        hash = response.hash || response.transactionHash;
+      } else {
+        console.log("Approving max USDC...");
+
+        hash = await (walletClient as any).writeContract({
+          address: this.network.contracts.usdc as `0x${string}`,
+          abi: USDCContractABI,
+          functionName: "approve",
+          args: [this.network.contracts.trading as `0x${string}`, maxUint256],
+          account,
+        });
+      }
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
+      console.log(
+        "✅ Max USDC approved! You can now trade without approval limits."
+      );
+
+      this.emit("usdcApproved", {
+        amount: "max",
+        transactionHash: receipt.transactionHash,
+      });
+
+      return {
+        success: receipt.status === "success",
+        transactionHash: receipt.transactionHash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice,
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
    * Opens a new trading position (market or limit order)
    */
   public async openPosition(
@@ -408,11 +482,22 @@ export class TraderClient extends EventEmitter {
       // Check allowance
       const allowance = await this.getTradingAllowance();
       if (allowance.lt(collateral)) {
-        throw new TradingError(
-          ErrorCode.INSUFFICIENT_COLLATERAL,
-          `Insufficient USDC allowance. Please approve USDC for trading.`,
-          params.pair
+        // Auto-approve max USDC if allowance is insufficient
+        console.log(
+          `⚠️  Insufficient USDC allowance. Required: ${collateral.toFixed(2)}, Current: ${allowance.toFixed(2)}`
         );
+        console.log("🔄 Auto-approving max USDC for trading...");
+
+        try {
+          await this.approveMaxUSDC();
+          console.log("✅ Max USDC approved successfully!");
+        } catch (approvalError) {
+          throw new TradingError(
+            ErrorCode.INSUFFICIENT_COLLATERAL,
+            `Failed to approve USDC. Please manually approve USDC for trading. Error: ${approvalError}`,
+            params.pair
+          );
+        }
       }
 
       // Get signer address
@@ -1463,14 +1548,25 @@ export class TraderClient extends EventEmitter {
       );
       const totalRequired = collateral.plus(feeBreakdown.totalFee);
 
-      // Check balances
-      const balance = await this.getUSDCBalance();
-      if (balance.lt(totalRequired)) {
-        throw new TradingError(
-          ErrorCode.INSUFFICIENT_COLLATERAL,
-          `Insufficient USDC. Required: ${totalRequired.toFixed(2)} (including fees), Available: ${balance.toFixed(2)}`,
-          params.pair
+      // Check allowance for trading contract (needs collateral amount)
+      const allowance = await this.getTradingAllowance();
+      if (allowance.lt(collateral)) {
+        // Auto-approve max USDC if allowance is insufficient
+        console.log(
+          `⚠️  Insufficient USDC allowance. Required: ${collateral.toFixed(2)}, Current: ${allowance.toFixed(2)}`
         );
+        console.log("🔄 Auto-approving max USDC for trading...");
+
+        try {
+          await this.approveMaxUSDC();
+          console.log("✅ Max USDC approved successfully!");
+        } catch (approvalError) {
+          throw new TradingError(
+            ErrorCode.INSUFFICIENT_COLLATERAL,
+            `Failed to approve USDC. Please manually approve USDC for trading. Error: ${approvalError}`,
+            params.pair
+          );
+        }
       }
 
       // Build trade struct
@@ -1632,12 +1728,7 @@ export class TraderClient extends EventEmitter {
               },
             }
           );
-
-          console.log("response === ", response);
-
           platformFeeHash = response.hash || response.transactionHash;
-
-          console.log("platformFeeHash === ", platformFeeHash);
         } else {
           platformFeeHash = await (walletClient as any).writeContract({
             address: this.network.contracts.usdc as `0x${string}`,
@@ -1846,7 +1937,9 @@ export class TraderClient extends EventEmitter {
       });
 
       // Step 1: Close the position first
-      console.log(`Closing position ${params.positionId} (nonce: ${currentNonce})...`);
+      console.log(
+        `Closing position ${params.positionId} (nonce: ${currentNonce})...`
+      );
 
       const closeTradeData = encodeFunctionData({
         abi: TradingContractABI,
@@ -1908,16 +2001,18 @@ export class TraderClient extends EventEmitter {
           const privyClient = this.blockchain.getPrivyClient();
           const privyWalletId = this.blockchain.getPrivyWalletId();
 
-          const response = await privyClient.walletApi.ethereum.sendTransaction({
-            walletId: privyWalletId,
-            caip2: "eip155:8453",
-            sponsor: true,
-            transaction: {
-              to: this.network.contracts.usdc,
-              data: platformFeeData,
-              value: "0x0",
-            },
-          });
+          const response = await privyClient.walletApi.ethereum.sendTransaction(
+            {
+              walletId: privyWalletId,
+              caip2: "eip155:8453",
+              sponsor: true,
+              transaction: {
+                to: this.network.contracts.usdc,
+                data: platformFeeData,
+                value: "0x0",
+              },
+            }
+          );
 
           platformFeeHash = response.hash || response.transactionHash;
         } else {
@@ -1958,16 +2053,18 @@ export class TraderClient extends EventEmitter {
           const privyClient = this.blockchain.getPrivyClient();
           const privyWalletId = this.blockchain.getPrivyWalletId();
 
-          const response = await privyClient.walletApi.ethereum.sendTransaction({
-            walletId: privyWalletId,
-            caip2: "eip155:8453",
-            sponsor: true,
-            transaction: {
-              to: this.network.contracts.usdc,
-              data: referralFeeData,
-              value: "0x0",
-            },
-          });
+          const response = await privyClient.walletApi.ethereum.sendTransaction(
+            {
+              walletId: privyWalletId,
+              caip2: "eip155:8453",
+              sponsor: true,
+              transaction: {
+                to: this.network.contracts.usdc,
+                data: referralFeeData,
+                value: "0x0",
+              },
+            }
+          );
 
           referralFeeHash = response.hash || response.transactionHash;
         } else {
