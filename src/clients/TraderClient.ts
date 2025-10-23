@@ -564,7 +564,6 @@ export class TraderClient extends EventEmitter {
       };
 
       console.log("tradeStruct === ", tradeStruct);
-      console.log("orderTypeValue === ", orderTypeValue);
 
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
@@ -1591,6 +1590,9 @@ export class TraderClient extends EventEmitter {
         default:
           orderTypeValue = OrderTypeValue.MARKET;
       }
+
+      console.log("orderType === ", orderType);
+      console.log("orderTypeValue === ", orderTypeValue);
 
       // Validate openPrice requirements based on order type
       // LIMIT and STOP_LIMIT orders REQUIRE openPrice to be explicitly provided
