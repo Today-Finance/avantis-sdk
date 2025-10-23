@@ -564,6 +564,7 @@ export class TraderClient extends EventEmitter {
       };
 
       console.log("tradeStruct === ", tradeStruct);
+      console.log("orderTypeValue === ", orderTypeValue);
 
       const walletClient = this.blockchain.getSigner();
       const account = this.blockchain.getAccount();
