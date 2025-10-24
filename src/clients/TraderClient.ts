@@ -67,6 +67,7 @@ import {
   TradingContractABI,
   USDCContractABI,
   Multicall3ContractABI,
+  MulticallContractABI,
   TradingStorageContractABI,
 } from "../contracts";
 import { FeeManager } from "../fees/FeeManager";
@@ -2294,6 +2295,7 @@ export class TraderClient extends EventEmitter {
 
   /**
    * Gets all pending limit orders for the current account
+   * Uses the custom Avantis Multicall contract for efficient data fetching
    */
   public async getPendingLimitOrders(
     address?: string
@@ -2301,78 +2303,85 @@ export class TraderClient extends EventEmitter {
     try {
       const addr = address || (await this.getAddress());
 
-      // Use StorageClient to fetch pending orders
-      const publicClient = this.blockchain.getProvider();
-      const tradingStorageAddress = this.network.contracts.tradingStorage;
-
+      // Check if Multicall contract is available
+      const multicallAddress = this.network.contracts.multicall;
       if (
-        !tradingStorageAddress ||
-        tradingStorageAddress === "0x0000000000000000000000000000000000000000"
+        !multicallAddress ||
+        multicallAddress === "0x0000000000000000000000000000000000000000"
       ) {
+        console.warn("Multicall contract not available for this network");
         return [];
       }
 
-      const tradingStorageContract: any = getContract({
-        address: tradingStorageAddress as `0x${string}`,
-        abi: TradingStorageContractABI,
+      const publicClient = this.blockchain.getProvider();
+
+      // Initialize the custom Avantis Multicall contract
+      const multicallContract: any = getContract({
+        address: multicallAddress as `0x${string}`,
+        abi: MulticallContractABI,
         client: publicClient as any,
       });
 
-      // Get pending orders from storage
-      // Note: This is a simplified implementation
-      // In reality, you'd need to iterate through pairs and indices
+      // Call getPositions which returns both active trades and pending limit orders
+      // Returns: [AggregatedTrade[], AggregatedOrder[]]
+      const result = await multicallContract.read.getPositions([
+        addr as `0x${string}`,
+      ]);
+
+      // Extract pending limit orders (second element of the tuple)
+      const aggregatedOrders = result[1];
       const orders: PendingLimitOrder[] = [];
 
-      // For each pair, check for pending limit orders
-      const markets = await this.socketAPI.getAllMarkets();
-      for (const market of markets) {
-        const pairIndex = market.pairIndex;
+      for (const aggregatedOrder of aggregatedOrders) {
+        const order = aggregatedOrder.order || aggregatedOrder[0];
+        const leverage = Number(order.leverage);
 
-        // Check up to 3 potential order indices per pair
-        for (let i = 0; i < 3; i++) {
-          try {
-            const order = await tradingStorageContract.read.openLimitOrders([
-              addr as `0x${string}`,
-              pairIndex,
-              i,
-            ]);
-
-            // Check if order exists
-            if (
-              order &&
-              order.trader !== "0x0000000000000000000000000000000000000000"
-            ) {
-              orders.push({
-                id: `${pairIndex}-${i}`,
-                trader: order.trader,
-                pairIndex,
-                orderIndex: i,
-                positionSize: new Decimal(formatUSDC(order.positionSizeUSDC)),
-                buy: order.buy,
-                leverage: Number(order.leverage),
-                openPrice: new Decimal(
-                  formatUSDC(order.minPrice || order.maxPrice)
-                ),
-                tp:
-                  order.tp && Number(order.tp) > 0
-                    ? new Decimal(formatUSDC(order.tp))
-                    : undefined,
-                sl:
-                  order.sl && Number(order.sl) > 0
-                    ? new Decimal(formatUSDC(order.sl))
-                    : undefined,
-                timestamp: new Date(),
-                orderType: OrderType.LIMIT,
-              });
-            }
-          } catch {
-            // Skip invalid orders
-          }
+        // Skip invalid orders (leverage <= 0 indicates no order)
+        if (leverage <= 0) {
+          continue;
         }
+
+        // Parse order data
+        // Order structure: [trader, pairIndex, index, positionSize, buy, leverage, tp, sl, price, slippageP, block, executionFee]
+        const pairIndex = Number(order.pairIndex);
+        const orderIndex = Number(order.index);
+
+        // Get pair name from Socket API for better UX (optional, can be removed if too slow)
+        let pairName: string | undefined;
+        try {
+          pairName = await this.getPairNameFromAPI(pairIndex);
+        } catch {
+          // If we can't get pair name, just skip it
+        }
+
+        orders.push({
+          id: `${pairIndex}-${orderIndex}`,
+          trader: order.trader,
+          pairIndex,
+          orderIndex,
+          pair: pairName,
+          positionSize: new Decimal(formatUSDC(order.positionSize)),
+          buy: order.buy,
+          leverage: leverage / 1e10, // Leverage uses 10 decimals
+          openPrice: new Decimal(order.price.toString()).div(1e10), // Price uses 10 decimals
+          tp:
+            order.tp && Number(order.tp) > 0
+              ? new Decimal(order.tp.toString()).div(1e10)
+              : undefined,
+          sl:
+            order.sl && Number(order.sl) > 0
+              ? new Decimal(order.sl.toString()).div(1e10)
+              : undefined,
+          slippageP: Number(order.slippageP) / 1e10, // Slippage uses 10 decimals (percentage)
+          block: Number(order.block),
+          timestamp: new Date(), // We don't have exact timestamp, use current
+          orderType: OrderType.LIMIT,
+        });
       }
 
       return orders;
     } catch (error) {
+      console.error("Error fetching pending limit orders:", error);
       return [];
     }
   }

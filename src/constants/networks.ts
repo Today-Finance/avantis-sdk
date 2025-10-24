@@ -24,7 +24,7 @@ export const NETWORKS: Record<"base" | "base-sepolia", NetworkConfig> = {
       vault: "0x0000000000000000000000000000000000000000", // TODO: Get USDC Vault address
       router: "0x0000000000000000000000000000000000000000", // TODO: Get Trading Router address
       avnt: "0x696F9436B67233384889472Cd7cD58A6fB5DF4f1", // AVNT Token
-      multicall: "0xb7125506Ff25211c4C51DFD8DdED0DedED0BEE6Fa8Cbf7", // Multicall contract
+      multicall: "0x7A829c5C97A2Bf8BeFB4b01d96A282E4763848d8", // Multicall contract (custom Avantis)
       referral: "0x1A110bBA13A1f16cCa4b79758BD39290f29De82D", // Referral contract
     },
     websocketUrl:

@@ -91,12 +91,15 @@ export interface PendingLimitOrder {
   trader: string;
   pairIndex: number;
   orderIndex: number;
+  pair?: string; // Pair name (e.g., "ETH/USD")
   positionSize: Decimal;
   buy: boolean;
   leverage: number;
   openPrice: Decimal;
   tp?: Decimal;
   sl?: Decimal;
+  slippageP?: number; // Slippage percentage
+  block?: number; // Block number when order was created
   timestamp: Date;
   orderType: OrderType;
 }
