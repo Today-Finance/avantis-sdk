@@ -514,10 +514,9 @@ export class TraderClient extends EventEmitter {
       const takeProfitUnits = params.takeProfit
         ? toPriceUnits(params.takeProfit)
         : BigInt(0);
-      const slippageUnits = parseUnits(
-        ((params.slippage || 0.5) / 100).toString(),
-        10
-      );
+      // Slippage is passed as percentage (e.g., 5 means 5%, not 0.05)
+      // Contract expects slippage in 10 decimal format, so 5% = 5 * 10^10
+      const slippageUnits = parseUnits(params.slippage.toString(), 10);
 
       // Get or fetch open price based on order type
       let openPriceUnits: bigint;
@@ -1166,10 +1165,9 @@ export class TraderClient extends EventEmitter {
       }
 
       const priceUnits = toPriceUnits(params.price);
-      const slippageUnits = parseUnits(
-        ((params.slippage || 0.5) / 100).toString(),
-        10
-      );
+      // Slippage is passed as percentage (e.g., 5 means 5%, not 0.05)
+      // Contract expects slippage in 10 decimal format, so 5% = 5 * 10^10
+      const slippageUnits = parseUnits(params.slippage.toString(), 10);
       const tpUnits = params.takeProfit
         ? toPriceUnits(params.takeProfit)
         : BigInt(0);
@@ -1660,10 +1658,9 @@ export class TraderClient extends EventEmitter {
 
       console.log("openPositionWithFees trade struct === ", tradeStruct);
 
-      const slippageUnits = parseUnits(
-        ((params.slippage || 0.5) / 100).toString(),
-        10
-      );
+      // Slippage is passed as percentage (e.g., 5 means 5%, not 0.05)
+      // Contract expects slippage in 10 decimal format, so 5% = 5 * 10^10
+      const slippageUnits = parseUnits(params.slippage.toString(), 10);
       const executionFee = parseEther("0"); // 0 ETH execution fee (per Avantis docs)
 
       // Bundle the transaction
