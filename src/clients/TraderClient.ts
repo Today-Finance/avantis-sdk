@@ -455,20 +455,25 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      // Validate position size using dynamic minimums from Socket API
-      const size = validatePositionSize(
-        params.size,
+      // Validate leverage using dynamic maximums from Socket API
+      validateLeverage(params.leverage, marketConfig.maxLeverage);
+
+      // params.size is the margin/collateral amount, not the notional position size
+      // Calculate the notional position size = margin × leverage
+      const margin = new Decimal(params.size);
+      const notionalSize = margin.mul(params.leverage);
+
+      // Validate the notional position size against min/max requirements
+      validatePositionSize(
+        notionalSize,
         marketConfig.minPositionSizeUSDC,
         marketConfig.maxPositionSizeUSDC.gt(0)
           ? marketConfig.maxPositionSizeUSDC
           : new Decimal(1000000)
       );
 
-      // Validate leverage using dynamic maximums from Socket API
-      validateLeverage(params.leverage, marketConfig.maxLeverage);
-
-      // Calculate collateral required
-      const collateral = size.div(params.leverage);
+      // The collateral is the margin amount (what the user deposits)
+      const collateral = margin;
 
       // Check USDC balance
       const balance = await this.getUSDCBalance();
@@ -507,7 +512,6 @@ export class TraderClient extends EventEmitter {
       // Prepare trade struct for contract
       const isLong = params.side === PositionSide.LONG;
       const collateralUnits = toUSDCUnits(collateral);
-      const positionSizeUnits = toUSDCUnits(size);
       const stopLossUnits = params.stopLoss
         ? toPriceUnits(params.stopLoss)
         : BigInt(0);
@@ -542,12 +546,13 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      // For MARKET_ZERO_FEE orders, positionSizeUSDC should contain collateral amount (not position size)
-      // For other order types, it contains the full position size
-      const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
-      const positionSizeValue = isZeroFeeOrder
-        ? collateralUnits
-        : positionSizeUnits;
+      // IMPORTANT: positionSizeUSDC should contain the COLLATERAL amount (margin), not the full position size
+      // The Avantis contract applies leverage internally. The contract expects:
+      // - positionSizeUSDC = collateral (margin) amount
+      // - leverage = the leverage multiplier
+      // The contract calculates: notional position size = positionSizeUSDC * leverage
+      // This applies to ALL order types (MARKET, LIMIT, STOP_LIMIT, MARKET_ZERO_FEE)
+      const positionSizeValue = collateralUnits;
 
       const tradeStruct = {
         trader: address,
@@ -1527,32 +1532,50 @@ export class TraderClient extends EventEmitter {
       const marketConfig = await this.getMarketConfig(params.pair);
       const pairIndex = marketConfig.pairIndex;
 
-      // Validate position size and leverage using dynamic limits from Socket API
-      const size = validatePositionSize(
-        params.size,
+      // Validate leverage using dynamic limits from Socket API
+      validateLeverage(params.leverage, marketConfig.maxLeverage);
+
+      // params.size is the margin/collateral amount, not the notional position size
+      // Calculate the notional position size = margin × leverage
+      const margin = new Decimal(params.size);
+      const notionalSize = margin.mul(params.leverage);
+
+      // Validate the notional position size against min/max requirements
+      validatePositionSize(
+        notionalSize,
         marketConfig.minPositionSizeUSDC,
         marketConfig.maxPositionSizeUSDC.gt(0)
           ? marketConfig.maxPositionSizeUSDC
           : new Decimal(1000000)
       );
-      validateLeverage(params.leverage, marketConfig.maxLeverage);
 
-      // Calculate collateral
-      const collateral = size.div(params.leverage);
-
-      // Calculate platform fees
+      // Calculate platform fees based on notional position size
       const feeBreakdown = this.feeManager.calculateFeeBreakdown(
-        size,
+        notionalSize,
         params.platformFee
       );
-      const totalRequired = collateral.plus(feeBreakdown.totalFee);
 
-      // Check allowance for trading contract (needs collateral amount)
+      // The fee is deducted FROM the margin, not added on top
+      // User deposits margin amount, fee is taken from it, remainder goes to trade
+      const actualCollateral = margin.minus(feeBreakdown.totalFee);
+      const totalRequired = margin; // User only needs to have the margin amount
+
+      // Verify the actual collateral after fee deduction still meets minimum requirements
+      const actualNotionalSize = actualCollateral.mul(params.leverage);
+      if (actualNotionalSize.lt(marketConfig.minPositionSizeUSDC)) {
+        throw new TradingError(
+          ErrorCode.MIN_SIZE_NOT_MET,
+          `Position size after fees (${actualNotionalSize.toFixed(2)} USDC) is below minimum (${marketConfig.minPositionSizeUSDC.toFixed(2)} USDC). Increase margin to compensate for fees.`,
+          params.pair
+        );
+      }
+
+      // Check allowance for trading contract (needs actual collateral amount going to trade)
       const allowance = await this.getTradingAllowance();
-      if (allowance.lt(collateral)) {
+      if (allowance.lt(actualCollateral)) {
         // Auto-approve max USDC if allowance is insufficient
         console.log(
-          `⚠️  Insufficient USDC allowance. Required: ${collateral.toFixed(2)}, Current: ${allowance.toFixed(2)}`
+          `⚠️  Insufficient USDC allowance. Required: ${actualCollateral.toFixed(2)}, Current: ${allowance.toFixed(2)}`
         );
         console.log("🔄 Auto-approving max USDC for trading...");
 
@@ -1627,8 +1650,8 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      const collateralUnits = toUSDCUnits(collateral);
-      const positionSizeUnits = toUSDCUnits(size);
+      // Use actualCollateral (margin minus fees) for the trade
+      const actualCollateralUnits = toUSDCUnits(actualCollateral);
       const stopLossUnits = params.stopLoss
         ? toPriceUnits(params.stopLoss)
         : BigInt(0);
@@ -1636,11 +1659,13 @@ export class TraderClient extends EventEmitter {
         ? toPriceUnits(params.takeProfit)
         : BigInt(0);
 
-      // For MARKET_ZERO_FEE orders, positionSizeUSDC should contain collateral amount (not position size)
-      const isZeroFeeOrder = orderType === OrderType.MARKET_ZERO_FEE;
-      const positionSizeValue = isZeroFeeOrder
-        ? collateralUnits
-        : positionSizeUnits;
+      // IMPORTANT: positionSizeUSDC should contain the COLLATERAL amount (margin minus fees), not the full position size
+      // The Avantis contract applies leverage internally. The contract expects:
+      // - positionSizeUSDC = actual collateral amount (after fee deduction)
+      // - leverage = the leverage multiplier
+      // The contract calculates: notional position size = positionSizeUSDC * leverage
+      // This applies to ALL order types (MARKET, LIMIT, STOP_LIMIT, MARKET_ZERO_FEE)
+      const positionSizeValue = actualCollateralUnits;
 
       const tradeStruct = {
         trader: address,
