@@ -18,7 +18,7 @@ export class SocketAPIClient {
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-  constructor(apiUrl: string = 'https://socket-api.avantisfi.com/v1/data') {
+  constructor(apiUrl: string = 'https://socket-api-pub.avantisfi.com/socket-api/v1/data') {
     this.apiUrl = apiUrl;
   }
 
