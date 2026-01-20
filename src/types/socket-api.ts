@@ -1,6 +1,6 @@
 /**
  * Type definitions for Avantis Socket API responses
- * API Endpoint: https://socket-api.avantisfi.com/v1/data
+ * API Endpoint: https://socket-api-pub.avantisfi.com/socket-api/v1/data
  */
 
 import Decimal from 'decimal.js';

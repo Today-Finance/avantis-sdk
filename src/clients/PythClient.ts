@@ -49,7 +49,7 @@ export class PythClient {
     // Use mainnet Hermes by default
     this.hermesUrl = config.hermesUrl || "https://hermes.pyth.network";
     this.socketApiUrl =
-      config.socketApiUrl || "https://socket-api.avantisfi.com/v1/data";
+      config.socketApiUrl || "https://socket-api-pub.avantisfi.com/socket-api/v1/data";
   }
 
   /**
