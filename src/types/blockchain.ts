@@ -48,7 +48,8 @@ export interface SignerConfig {
     | "jsonRpc"
     | "injected"
     | "viemClient"
-    | "privyClient";
+    | "privyClient"
+    | "gelatoClient";
   privateKey?: string;
   mnemonic?: string;
   path?: string;
@@ -56,6 +57,8 @@ export interface SignerConfig {
   client?: WalletClient; // For viem WalletClient (like kernel client)
   privyClient?: any; // For Privy SDK client with native gas sponsorship
   privyWalletId?: string; // Privy wallet ID for API calls
+  gelatoApiKey?: string; // Gelato API key for gasless relay
+  gelatoBuilderCode?: string; // Optional Avantis builder code for attribution
 }
 
 export interface TransactionConfig {

@@ -1,6 +1,6 @@
 {
   "name": "@todayapp/avantis-sdk",
-  "version": "1.1.0-beta.58",
+  "version": "1.1.0-beta.59",
   "description": "Unofficial TypeScript SDK for Avantis DEX - Decentralized perpetual futures trading (BETA)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -59,6 +59,7 @@
     "url": "git+https://github.com/Today-Finance/avantis-sdk.git"
   },
   "dependencies": {
+    "@gelatocloud/gasless": "^0.0.7",
     "@privy-io/server-auth": "^1.32.5",
     "@zerodev/ecdsa-validator": "^5.4.9",
     "@zerodev/sdk": "^5.5.4",

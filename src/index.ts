@@ -29,6 +29,8 @@ export * from "./types/socket-api";
 
 // Utility exports
 export * from "./utils";
+export { GelatoExecutor, encodeNonce, getBuilderCodeSuffix } from "./utils/gelato";
+export type { GelatoConfig, GelatoTransactionParams, GelatoTransactionResult } from "./utils/gelato";
 
 // Export pairs utilities
 export {

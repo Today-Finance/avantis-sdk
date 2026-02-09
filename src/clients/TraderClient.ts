@@ -79,6 +79,8 @@ import type {
 } from "../types/platform-fees";
 import { PythClient } from "./PythClient";
 import { SocketAPIClient } from "./SocketAPIClient";
+import { GelatoExecutor } from "../utils/gelato";
+import type { Hex } from "viem";
 
 export class TraderClient extends EventEmitter {
   private blockchain: BlockchainProvider;
@@ -90,6 +92,7 @@ export class TraderClient extends EventEmitter {
   private multicallBundler?: MulticallBundler;
   private pythClient: PythClient;
   private socketAPI: SocketAPIClient;
+  private gelatoExecutor?: GelatoExecutor; // Gelato gasless executor (priority)
   private marketConfigCache?: Map<string, any>; // Cache for market configs
   private marketCacheTimestamp: number = 0;
   private readonly MARKET_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -142,11 +145,28 @@ export class TraderClient extends EventEmitter {
 
   /**
    * Sets the signer for transactions
+   * Priority: Gelato (gasless) > Privy (gasless) > EOA (gas required)
    */
   public async setSigner(config: SignerConfig): Promise<void> {
     this.blockchain.setSigner(config);
 
     const account = this.blockchain.getAccount();
+
+    // Initialize GelatoExecutor if Gelato is configured
+    if (config.type === "gelatoClient" && config.gelatoApiKey) {
+      this.gelatoExecutor = new GelatoExecutor({
+        apiKey: config.gelatoApiKey,
+        account: account,
+        walletClient: this.blockchain.getSigner(),
+        builderCode: config.gelatoBuilderCode,
+      });
+      console.log(
+        "[TraderClient] Gelato executor initialized for gasless transactions"
+      );
+    } else {
+      // Clear Gelato executor if switching to a different signer type
+      this.gelatoExecutor = undefined;
+    }
 
     this.emit("signerSet", account.address);
   }
@@ -223,6 +243,77 @@ export class TraderClient extends EventEmitter {
   }
 
   /**
+   * Unified transaction sender: Gelato (gasless) > Privy (gasless) > EOA
+   *
+   * This method abstracts away the gas sponsorship layer and returns the tx hash.
+   * Priority: Gelato → Privy → EOA (standard viem wallet)
+   *
+   * @param params.to - Target contract address
+   * @param params.data - Encoded calldata (Hex)
+   * @param params.value - Optional ETH value to send
+   * @param params.nonce - Optional nonce (only used for EOA fallback)
+   * @returns Transaction hash string
+   */
+  private async sendContractTransaction(params: {
+    to: string;
+    data: Hex;
+    value?: bigint;
+    nonce?: number;
+  }): Promise<string> {
+    // 1. Gelato (priority - gasless via relay)
+    if (this.gelatoExecutor) {
+      console.log("Using Gelato gasless relay...");
+      const result = await this.gelatoExecutor.execute({
+        to: params.to,
+        data: params.data,
+        value: params.value,
+      });
+      console.log("Gelato transaction submitted:", result.hash);
+      return result.hash;
+    }
+
+    // 2. Privy (gasless via Privy gas sponsorship)
+    if (this.blockchain.hasPrivyClient()) {
+      console.log("Using Privy native gas sponsorship...");
+      const privyClient = this.blockchain.getPrivyClient();
+      const privyWalletId = this.blockchain.getPrivyWalletId();
+
+      const response = await privyClient.walletApi.ethereum.sendTransaction({
+        walletId: privyWalletId,
+        caip2: "eip155:8453",
+        sponsor: true,
+        transaction: {
+          to: params.to,
+          data: params.data,
+          value: params.value ? `0x${params.value.toString(16)}` : "0x0",
+        },
+      });
+
+      const hash = response.hash || response.transactionHash;
+      console.log("Privy transaction submitted:", hash);
+      return hash;
+    }
+
+    // 3. EOA fallback (user pays gas)
+    console.log("Using standard viem sendTransaction (no gas sponsorship)...");
+    const walletClient = this.blockchain.getSigner();
+    const account = this.blockchain.getAccount();
+
+    const txParams: any = {
+      to: params.to as `0x${string}`,
+      data: params.data as `0x${string}`,
+      value: params.value ?? 0n,
+      account,
+    };
+
+    if (params.nonce !== undefined) {
+      txParams.nonce = params.nonce;
+    }
+
+    return await (walletClient as any).sendTransaction(txParams);
+  }
+
+  /**
    * Gets USDC balance
    */
   public async getUSDCBalance(address?: string): Promise<Decimal> {
@@ -272,42 +363,16 @@ export class TraderClient extends EventEmitter {
       const amountDecimal = new Decimal(amount);
       const amountUnits = toUSDCUnits(amountDecimal);
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: USDCContractABI,
         functionName: "approve",
         args: [this.network.contracts.trading as `0x${string}`, amountUnits],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.usdc,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.usdc as `0x${string}`,
-          abi: USDCContractABI,
-          functionName: "approve",
-          args: [this.network.contracts.trading as `0x${string}`, amountUnits],
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.usdc,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -333,9 +398,6 @@ export class TraderClient extends EventEmitter {
    */
   public async approveMaxUSDC(): Promise<TradeResponse> {
     try {
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       // Use max uint256 value for unlimited approval
       const maxUint256 = BigInt(
         "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -347,37 +409,12 @@ export class TraderClient extends EventEmitter {
         args: [this.network.contracts.trading as `0x${string}`, maxUint256],
       });
 
-      let hash: string;
+      console.log("Approving max USDC...");
 
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        console.log("Approving max USDC with Privy gas sponsorship...");
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.usdc,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        console.log("Approving max USDC...");
-
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.usdc as `0x${string}`,
-          abi: USDCContractABI,
-          functionName: "approve",
-          args: [this.network.contracts.trading as `0x${string}`, maxUint256],
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.usdc,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -387,6 +424,56 @@ export class TraderClient extends EventEmitter {
 
       this.emit("usdcApproved", {
         amount: "max",
+        transactionHash: receipt.transactionHash,
+      });
+
+      return {
+        success: receipt.status === "success",
+        transactionHash: receipt.transactionHash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice,
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Approves USDC for a specific contract address (e.g., tradingStorage)
+   * This is useful when multiple contracts need USDC allowance
+   */
+  public async approveUSDCForContract(
+    contractAddress: string,
+    amount?: Decimal | number | string
+  ): Promise<TradeResponse> {
+    try {
+      const maxUint256 = BigInt(
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      );
+      const approvalAmount = amount
+        ? toUSDCUnits(new Decimal(amount))
+        : maxUint256;
+
+      const data = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "approve",
+        args: [contractAddress as `0x${string}`, approvalAmount],
+      });
+
+      console.log(`Approving USDC for contract ${contractAddress}...`);
+
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.usdc,
+        data: data as Hex,
+      });
+
+      const receipt = await this.blockchain.waitForTransaction(hash);
+
+      console.log(`✅ USDC approved for ${contractAddress}!`);
+
+      this.emit("usdcApproved", {
+        amount: amount || "max",
+        contractAddress,
         transactionHash: receipt.transactionHash,
       });
 
@@ -570,53 +657,16 @@ export class TraderClient extends EventEmitter {
 
       console.log("tradeStruct === ", tradeStruct);
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "openTrade",
         args: [tradeStruct, orderTypeValue, slippageUnits],
       });
 
-      let hash: string;
-
-      // Check if we have Privy client configured for native gas sponsorship
-      if (this.blockchain.hasPrivyClient()) {
-        console.log("Using Privy native gas sponsorship...");
-
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        // Use Privy's walletApi.ethereum.sendTransaction with sponsor: true
-        // This properly routes through Privy's infrastructure for gas sponsorship
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453", // Base mainnet
-          sponsor: true, // Enable Privy native gas sponsorship
-          transaction: {
-            to: this.network.contracts.trading as `0x${string}`,
-            data,
-            value: `0x0`,
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-        console.log("Privy transaction submitted:", hash);
-      } else {
-        console.log(
-          "Using standard viem sendTransaction (no gas sponsorship)..."
-        );
-
-        // Fallback to standard viem sendTransaction
-        // User pays both gas fees and execution fee
-        hash = await (walletClient as any).sendTransaction({
-          to: this.network.contracts.trading as `0x${string}`,
-          data,
-          value: 0, // Execution fee required by Avantis (0 ETH)
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -697,43 +747,16 @@ export class TraderClient extends EventEmitter {
         ? toUSDCUnits(collateralToClose)
         : BigInt(0);
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "closeTradeMarket",
         args: [pairIndex, positionIndex, closeAmount],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "closeTradeMarket",
-          args: [pairIndex, positionIndex, closeAmount],
-          value: BigInt(0),
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -809,9 +832,6 @@ export class TraderClient extends EventEmitter {
 
       console.log("priceUpdateData === ", priceUpdateData);
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateTpAndSl",
@@ -824,39 +844,10 @@ export class TraderClient extends EventEmitter {
         ],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "updateTpAndSl",
-          args: [
-            pairIndex,
-            positionIndex,
-            stopLossUnits,
-            takeProfitUnits,
-            priceUpdateData,
-          ],
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -1096,47 +1087,18 @@ export class TraderClient extends EventEmitter {
         );
       }
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "cancelOpenLimitOrder",
         args: [params.pairIndex, params.orderIndex],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "cancelOpenLimitOrder",
-          args: [params.pairIndex, params.orderIndex],
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
-
-      // Note: Event parsing simplified - events will be emitted from contract
-      const event = receipt.logs[0]; // First log typically contains the event
 
       this.emit("limitOrderCanceled", {
         pairIndex: params.pairIndex,
@@ -1180,9 +1142,6 @@ export class TraderClient extends EventEmitter {
         ? toPriceUnits(params.stopLoss)
         : BigInt(0);
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateOpenLimitOrder",
@@ -1196,45 +1155,12 @@ export class TraderClient extends EventEmitter {
         ],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "updateOpenLimitOrder",
-          args: [
-            params.pairIndex,
-            params.orderIndex,
-            priceUnits,
-            slippageUnits,
-            tpUnits,
-            slUnits,
-          ],
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
-
-      // Note: Event parsing simplified - events will be emitted from contract
-      const event = receipt.logs[0]; // First log typically contains the event
 
       this.emit("limitOrderUpdated", {
         pairIndex: params.pairIndex,
@@ -1708,21 +1634,25 @@ export class TraderClient extends EventEmitter {
 
       console.log("openPositionWithFees bundled === ", bundled);
 
-      // Execute fee transfers and trade separately (Multicall3 won't work for transfers)
-      // Step 1: Transfer platform fee directly from user wallet
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
+      // Execute fee transfers and trade separately
+      // For Gelato/Privy: each call is gasless, nonces are managed internally
+      // For EOA: we manually track nonces for sequential transactions
       const publicClient = this.blockchain.getProvider();
+      const account = this.blockchain.getAccount();
 
-      // Fetch the current nonce to avoid nonce conflicts
-      let currentNonce = await publicClient.getTransactionCount({
-        address: account.address,
-        blockTag: "pending",
-      });
+      // Only fetch nonce for EOA mode (Gelato/Privy handle nonces internally)
+      let currentNonce: number | undefined;
+      if (!this.gelatoExecutor && !this.blockchain.hasPrivyClient()) {
+        currentNonce = await publicClient.getTransactionCount({
+          address: account.address,
+          blockTag: "pending",
+        });
+      }
 
+      // Step 1: Transfer platform fee
       if (feeBreakdown.platformReceives.gt(0)) {
         console.log(
-          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC (nonce: ${currentNonce})`
+          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC`
         );
 
         const platformFeeData = encodeFunctionData({
@@ -1734,43 +1664,14 @@ export class TraderClient extends EventEmitter {
           ],
         });
 
-        console.log("hasPrivyClient === ", this.blockchain.hasPrivyClient());
-
-        let platformFeeHash: string;
-
-        if (this.blockchain.hasPrivyClient()) {
-          const privyClient = this.blockchain.getPrivyClient();
-          const privyWalletId = this.blockchain.getPrivyWalletId();
-
-          const response = await privyClient.walletApi.ethereum.sendTransaction(
-            {
-              walletId: privyWalletId,
-              caip2: "eip155:8453",
-              sponsor: true,
-              transaction: {
-                to: this.network.contracts.usdc,
-                data: platformFeeData,
-                value: "0x0",
-              },
-            }
-          );
-          platformFeeHash = response.hash || response.transactionHash;
-        } else {
-          platformFeeHash = await (walletClient as any).writeContract({
-            address: this.network.contracts.usdc as `0x${string}`,
-            abi: USDCContractABI,
-            functionName: "transfer",
-            args: [
-              feeConfig.platformWallet as `0x${string}`,
-              toUSDCUnits(feeBreakdown.platformReceives),
-            ],
-            account,
-            nonce: currentNonce,
-          });
-        }
+        const platformFeeHash = await this.sendContractTransaction({
+          to: this.network.contracts.usdc,
+          data: platformFeeData as Hex,
+          nonce: currentNonce,
+        });
 
         await this.blockchain.waitForTransaction(platformFeeHash);
-        currentNonce++; // Increment nonce for next transaction
+        if (currentNonce !== undefined) currentNonce++;
       }
 
       // Step 2: Transfer referral fee (if applicable)
@@ -1779,7 +1680,7 @@ export class TraderClient extends EventEmitter {
         feeBreakdown.referralFee.gt(0)
       ) {
         console.log(
-          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC (nonce: ${currentNonce})`
+          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC`
         );
 
         const referralFeeData = encodeFunctionData({
@@ -1791,46 +1692,18 @@ export class TraderClient extends EventEmitter {
           ],
         });
 
-        let referralFeeHash: string;
-
-        if (this.blockchain.hasPrivyClient()) {
-          const privyClient = this.blockchain.getPrivyClient();
-          const privyWalletId = this.blockchain.getPrivyWalletId();
-
-          const response = await privyClient.walletApi.ethereum.sendTransaction(
-            {
-              walletId: privyWalletId,
-              caip2: "eip155:8453",
-              sponsor: true,
-              transaction: {
-                to: this.network.contracts.usdc,
-                data: referralFeeData,
-                value: "0x0",
-              },
-            }
-          );
-
-          referralFeeHash = response.hash || response.transactionHash;
-        } else {
-          referralFeeHash = await (walletClient as any).writeContract({
-            address: this.network.contracts.usdc as `0x${string}`,
-            abi: USDCContractABI,
-            functionName: "transfer",
-            args: [
-              params.platformFee.referralAddress as `0x${string}`,
-              toUSDCUnits(feeBreakdown.referralFee),
-            ],
-            account,
-            nonce: currentNonce,
-          });
-        }
+        const referralFeeHash = await this.sendContractTransaction({
+          to: this.network.contracts.usdc,
+          data: referralFeeData as Hex,
+          nonce: currentNonce,
+        });
 
         await this.blockchain.waitForTransaction(referralFeeHash);
-        currentNonce++; // Increment nonce for next transaction
+        if (currentNonce !== undefined) currentNonce++;
       }
 
       // Step 3: Execute the trade
-      console.log(`Executing trade on Avantis... (nonce: ${currentNonce})`);
+      console.log(`Executing trade on Avantis...`);
 
       const tradeData = encodeFunctionData({
         abi: TradingContractABI,
@@ -1838,35 +1711,12 @@ export class TraderClient extends EventEmitter {
         args: [tradeStruct, orderTypeValue, slippageUnits],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data: tradeData,
-            value: `0x${executionFee.toString(16)}`,
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "openTrade",
-          args: [tradeStruct, orderTypeValue, slippageUnits],
-          value: executionFee,
-          account,
-          nonce: currentNonce,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: tradeData as Hex,
+        value: executionFee,
+        nonce: currentNonce,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -1951,21 +1801,22 @@ export class TraderClient extends EventEmitter {
       const feeConfig = this.feeManager.getConfig();
       const executionFee = parseEther("0"); // 0 ETH execution fee (per Avantis docs)
 
-      // Execute close and fee transfers separately (Multicall3 won't work for transfers with smart accounts)
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
+      // Execute close and fee transfers separately
+      // For Gelato/Privy: each call is gasless, nonces are managed internally
+      // For EOA: we manually track nonces for sequential transactions
       const publicClient = this.blockchain.getProvider();
+      const account = this.blockchain.getAccount();
 
-      // Fetch the current nonce to avoid nonce conflicts
-      let currentNonce = await publicClient.getTransactionCount({
-        address: account.address,
-        blockTag: "pending",
-      });
+      let currentNonce: number | undefined;
+      if (!this.gelatoExecutor && !this.blockchain.hasPrivyClient()) {
+        currentNonce = await publicClient.getTransactionCount({
+          address: account.address,
+          blockTag: "pending",
+        });
+      }
 
       // Step 1: Close the position first
-      console.log(
-        `Closing position ${params.positionId} (nonce: ${currentNonce})...`
-      );
+      console.log(`Closing position ${params.positionId}...`);
 
       const closeTradeData = encodeFunctionData({
         abi: TradingContractABI,
@@ -1973,43 +1824,22 @@ export class TraderClient extends EventEmitter {
         args: [BigInt(pairIndex), BigInt(positionIndex), closeAmount],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data: closeTradeData,
-            value: `0x${executionFee.toString(16)}`,
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).sendTransaction({
-          to: this.network.contracts.trading as `0x${string}`,
-          data: closeTradeData as `0x${string}`,
-          value: executionFee,
-          account,
-          nonce: currentNonce,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: closeTradeData as Hex,
+        value: executionFee,
+        nonce: currentNonce,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
-      currentNonce++; // Increment nonce for next transaction
+      if (currentNonce !== undefined) currentNonce++;
 
       console.log(`✅ Position closed! TX: ${receipt.transactionHash}`);
 
-      // Step 2: Transfer platform fee (from returned collateral in smart account)
+      // Step 2: Transfer platform fee (from returned collateral)
       if (feeBreakdown.platformReceives.gt(0)) {
         console.log(
-          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC (nonce: ${currentNonce})`
+          `Transferring platform fee: ${feeBreakdown.platformReceives.toFixed(6)} USDC`
         );
 
         const platformFeeData = encodeFunctionData({
@@ -2021,38 +1851,14 @@ export class TraderClient extends EventEmitter {
           ],
         });
 
-        let platformFeeHash: string;
-
-        if (this.blockchain.hasPrivyClient()) {
-          const privyClient = this.blockchain.getPrivyClient();
-          const privyWalletId = this.blockchain.getPrivyWalletId();
-
-          const response = await privyClient.walletApi.ethereum.sendTransaction(
-            {
-              walletId: privyWalletId,
-              caip2: "eip155:8453",
-              sponsor: true,
-              transaction: {
-                to: this.network.contracts.usdc,
-                data: platformFeeData,
-                value: "0x0",
-              },
-            }
-          );
-
-          platformFeeHash = response.hash || response.transactionHash;
-        } else {
-          platformFeeHash = await (walletClient as any).sendTransaction({
-            to: this.network.contracts.usdc as `0x${string}`,
-            data: platformFeeData as `0x${string}`,
-            value: 0n,
-            account,
-            nonce: currentNonce,
-          });
-        }
+        const platformFeeHash = await this.sendContractTransaction({
+          to: this.network.contracts.usdc,
+          data: platformFeeData as Hex,
+          nonce: currentNonce,
+        });
 
         await this.blockchain.waitForTransaction(platformFeeHash);
-        currentNonce++; // Increment nonce for next transaction
+        if (currentNonce !== undefined) currentNonce++;
       }
 
       // Step 3: Transfer referral fee (if applicable)
@@ -2061,7 +1867,7 @@ export class TraderClient extends EventEmitter {
         feeBreakdown.referralFee.gt(0)
       ) {
         console.log(
-          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC (nonce: ${currentNonce})`
+          `Transferring referral fee: ${feeBreakdown.referralFee.toFixed(6)} USDC`
         );
 
         const referralFeeData = encodeFunctionData({
@@ -2073,35 +1879,11 @@ export class TraderClient extends EventEmitter {
           ],
         });
 
-        let referralFeeHash: string;
-
-        if (this.blockchain.hasPrivyClient()) {
-          const privyClient = this.blockchain.getPrivyClient();
-          const privyWalletId = this.blockchain.getPrivyWalletId();
-
-          const response = await privyClient.walletApi.ethereum.sendTransaction(
-            {
-              walletId: privyWalletId,
-              caip2: "eip155:8453",
-              sponsor: true,
-              transaction: {
-                to: this.network.contracts.usdc,
-                data: referralFeeData,
-                value: "0x0",
-              },
-            }
-          );
-
-          referralFeeHash = response.hash || response.transactionHash;
-        } else {
-          referralFeeHash = await (walletClient as any).sendTransaction({
-            to: this.network.contracts.usdc as `0x${string}`,
-            data: referralFeeData as `0x${string}`,
-            value: 0n,
-            account,
-            nonce: currentNonce,
-          });
-        }
+        const referralFeeHash = await this.sendContractTransaction({
+          to: this.network.contracts.usdc,
+          data: referralFeeData as Hex,
+          nonce: currentNonce,
+        });
 
         await this.blockchain.waitForTransaction(referralFeeHash);
       }
@@ -2157,9 +1939,6 @@ export class TraderClient extends EventEmitter {
         }
       }
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "updateMargin",
@@ -2172,40 +1951,10 @@ export class TraderClient extends EventEmitter {
         ],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "updateMargin",
-          args: [
-            params.pairIndex,
-            params.positionIndex,
-            params.type,
-            amountUnits,
-            priceUpdateData,
-          ],
-          value: BigInt(0),
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -2244,9 +1993,6 @@ export class TraderClient extends EventEmitter {
 
       const priceUpdateData = params.priceUpdateData || [];
 
-      const walletClient = this.blockchain.getSigner();
-      const account = this.blockchain.getAccount();
-
       const data = encodeFunctionData({
         abi: TradingContractABI,
         functionName: "executeLimitOrder",
@@ -2259,40 +2005,10 @@ export class TraderClient extends EventEmitter {
         ],
       });
 
-      let hash: string;
-
-      if (this.blockchain.hasPrivyClient()) {
-        const privyClient = this.blockchain.getPrivyClient();
-        const privyWalletId = this.blockchain.getPrivyWalletId();
-
-        const response = await privyClient.walletApi.ethereum.sendTransaction({
-          walletId: privyWalletId,
-          caip2: "eip155:8453",
-          sponsor: true,
-          transaction: {
-            to: this.network.contracts.trading,
-            data,
-            value: "0x0",
-          },
-        });
-
-        hash = response.hash || response.transactionHash;
-      } else {
-        hash = await (walletClient as any).writeContract({
-          address: this.network.contracts.trading as `0x${string}`,
-          abi: TradingContractABI,
-          functionName: "executeLimitOrder",
-          args: [
-            params.orderType,
-            params.trader as `0x${string}`,
-            params.pairIndex,
-            params.index,
-            priceUpdateData,
-          ],
-          value: BigInt(0),
-          account,
-        });
-      }
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.trading,
+        data: data as Hex,
+      });
 
       const receipt = await this.blockchain.waitForTransaction(hash);
 
@@ -2302,6 +2018,55 @@ export class TraderClient extends EventEmitter {
         pairIndex: params.pairIndex,
         index: params.index,
         transactionHash: receipt.transactionHash,
+      });
+
+      return {
+        success: receipt.status === "success",
+        transactionHash: receipt.transactionHash,
+        gasUsed: receipt.gasUsed,
+        effectiveGasPrice: receipt.effectiveGasPrice,
+      };
+    } catch (error) {
+      throw handleError(error);
+    }
+  }
+
+  /**
+   * Transfer USDC to another address (uses Gelato/Privy/EOA priority)
+   *
+   * Useful for fee sharing, post-owner rewards, or any USDC transfer
+   * that should route through the same gasless flow as trading operations.
+   *
+   * @param toAddress - Recipient address
+   * @param amount - Amount in USDC (human-readable, e.g., 1.5 for 1.5 USDC)
+   * @returns Transaction result
+   */
+  public async transferUSDC(
+    toAddress: string,
+    amount: number | string
+  ): Promise<TradeResponse> {
+    try {
+      const amountDecimal = new Decimal(amount);
+      const amountUnits = toUSDCUnits(amountDecimal);
+
+      const data = encodeFunctionData({
+        abi: USDCContractABI,
+        functionName: "transfer",
+        args: [toAddress as `0x${string}`, amountUnits],
+      });
+
+      console.log(
+        `Transferring ${amountDecimal.toFixed(6)} USDC to ${toAddress}...`
+      );
+
+      const hash = await this.sendContractTransaction({
+        to: this.network.contracts.usdc,
+        data: data as Hex,
+      });
+
+      const publicClient = this.blockchain.getProvider();
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash: hash as `0x${string}`,
       });
 
       return {

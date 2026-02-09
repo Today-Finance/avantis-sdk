@@ -45,6 +45,8 @@ export class BlockchainProvider {
   private network: NetworkConfig;
   private privyClient?: any; // Privy SDK client for native gas sponsorship
   private privyWalletId?: string; // Privy wallet ID for API calls
+  private gelatoApiKey?: string; // Gelato API key for gasless relay
+  private gelatoBuilderCode?: string; // Optional Avantis builder code for attribution
   private readonly config: {
     confirmations: number;
     timeout: number;
@@ -197,6 +199,44 @@ export class BlockchainProvider {
           );
           break;
 
+        case "gelatoClient":
+          // Handle Gelato gasless relay (priority gasless option)
+          if (!config.gelatoApiKey) {
+            throw new ValidationError(
+              "Gelato API key is required for gelatoClient type"
+            );
+          }
+          if (!config.client) {
+            throw new ValidationError(
+              "Viem client is required for gelatoClient type (the account signs Gelato transactions)"
+            );
+          }
+          if (!config.client.account) {
+            throw new ValidationError(
+              "Client must have an account for gelatoClient type"
+            );
+          }
+
+          // Store Gelato config
+          this.gelatoApiKey = config.gelatoApiKey;
+          this.gelatoBuilderCode = config.gelatoBuilderCode;
+
+          // Store the viem client and account (used for signing and read operations)
+          this.walletClient = config.client;
+          this.account = config.client.account;
+
+          // Clear Privy state since Gelato takes priority
+          this.privyClient = undefined;
+          this.privyWalletId = undefined;
+
+          console.log(
+            "[BlockchainProvider] Set Gelato client for address:",
+            this.account.address,
+            "builder code:",
+            this.gelatoBuilderCode || "(none)"
+          );
+          break;
+
         default:
           throw new ValidationError("Invalid signer type");
       }
@@ -258,6 +298,27 @@ export class BlockchainProvider {
    */
   public hasPrivyClient(): boolean {
     return !!this.privyClient && !!this.privyWalletId;
+  }
+
+  /**
+   * Checks if Gelato client is configured
+   */
+  public hasGelatoClient(): boolean {
+    return !!this.gelatoApiKey && !!this.account;
+  }
+
+  /**
+   * Gets the Gelato API key (if configured)
+   */
+  public getGelatoApiKey(): string | undefined {
+    return this.gelatoApiKey;
+  }
+
+  /**
+   * Gets the Gelato builder code (if configured)
+   */
+  public getGelatoBuilderCode(): string | undefined {
+    return this.gelatoBuilderCode;
   }
 
   /**
